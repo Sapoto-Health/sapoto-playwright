@@ -38,7 +38,7 @@
 import vm from 'vm';
 
 import { test, expect } from '@playwright/test';
-import { buildChromeBrands } from '../../packages/playwright-core/src/server/chromium/crPage';
+import { buildChromeBrands } from '../../packages/playwright-core/src/server/chromium/chromeUaBrands';
 import { CDP_STEALTH_INIT_SCRIPT } from '../../packages/playwright-core/src/tools/backend/stealthInitScript';
 
 // ------------------------------------------------------------------

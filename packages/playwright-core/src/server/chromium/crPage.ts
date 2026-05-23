@@ -18,6 +18,7 @@
 import { assert } from '@isomorphic/assert';
 import { rewriteErrorMessage } from '@isomorphic/stackTrace';
 import { eventsHelper } from '@utils/eventsHelper';
+import { buildChromeBrands } from './chromeUaBrands';
 import * as dialog from '../dialog';
 import * as dom from '../dom';
 import * as frames from '../frames';
@@ -1303,32 +1304,8 @@ function calculateUserAgentMetadata(options: types.BrowserContextOptions) {
   return metadata;
 }
 
-// CDP Stealth: Build Chrome's UA Client Hint brand list from the running browser's
-// version string. Real Chrome emits three brands: "Chromium", "Google Chrome", and a
-// rotating "Not/A)Brand" (a.k.a. the "GREASE" brand). Tests of this function should
-// cover the version derivation and the three-entry shape — not the exact GREASE string
-// (which Chromium has changed multiple times: ";Not A Brand", "Not/A)Brand", "Not?A_Brand").
-//
-// Exported so the unit tests can validate without spinning up Chromium.
-export function buildChromeBrands(fullVersion: string): {
-  brands: Protocol.Emulation.UserAgentBrandVersion[];
-  fullVersionList: Protocol.Emulation.UserAgentBrandVersion[];
-  fullVersion: string;
-} | undefined {
-  const majorVersion = fullVersion.split('.')[0];
-  if (!majorVersion)
-    return undefined;
-  return {
-    brands: [
-      { brand: 'Chromium', version: majorVersion },
-      { brand: 'Google Chrome', version: majorVersion },
-      { brand: 'Not/A)Brand', version: '99' },
-    ],
-    fullVersionList: [
-      { brand: 'Chromium', version: fullVersion },
-      { brand: 'Google Chrome', version: fullVersion },
-      { brand: 'Not/A)Brand', version: '99.0.0.0' },
-    ],
-    fullVersion,
-  };
-}
+// CDP Stealth: `buildChromeBrands` is extracted to ./chromeUaBrands so that unit
+// tests can import it without transitively pulling in dom.ts (whose `declare
+// readonly` class fields choke babel-jest's parser). Re-exported here so existing
+// `import { buildChromeBrands } from './crPage'` callers keep working.
+export { buildChromeBrands } from './chromeUaBrands';
