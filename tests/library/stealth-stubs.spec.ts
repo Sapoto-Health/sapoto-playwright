@@ -190,25 +190,40 @@ test('stealth init: Notification.permission flipped from granted to default', ()
   expect(ctx.Notification.permission).toBe('default');
 });
 
-test('stealth init: window.print becomes a deferred handler when suppressFocus=true (C3)', () => {
-  // Per Sapoto #1044: C3 (deferred print + Path D bridge) is gated on
-  // suppressFocus, not on stealth. The stealth-only path leaves print alone.
-  const { buildStealthInitScript } = require('../../packages/playwright-core/src/tools/backend/stealthInitScript');
+test('stealth init: window.print becomes a deferred handler in credentials-mode shape (C3)', () => {
+  // Post-Sapoto #1044 codex P2 fix: C3 (deferred print + Path D bridge) is
+  // gated on `stealth`, restoring its M3 reachability. The credentials-mode
+  // shape is stealth=true, suppressFocus=false — and CDP_STEALTH_INIT_SCRIPT
+  // is built with exactly that shape.
   const ctx = newPageContext();
   const printBefore = ctx.print;
-  vm.runInContext(buildStealthInitScript({ stealth: true, suppressFocus: true }), ctx);
+  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
   expect(ctx.print).not.toBe(printBefore);
   expect(typeof ctx.print).toBe('function');
   // Calling it must NOT throw (it should schedule a deferred check and return).
   expect(() => ctx.print()).not.toThrow();
 });
 
-test('stealth init: window.print untouched when suppressFocus=false (C3 gated off)', () => {
-  // The default-options export is suppressFocus:false. C3 must NOT install.
+test('stealth init: stealth=true + suppressFocus=false installs C3 deferred-print bridge', () => {
+  // Explicit coverage for the credentials-mode shape (M3 restoration per #1044
+  // codex P2). C3 replaces window.print with a deferred function; C4 must NOT
+  // also install because suppressFocus=false. Asserts the deferred handler
+  // schedules via setTimeout and is distinct from native window.print.
+  const { buildStealthInitScript } = require('../../packages/playwright-core/src/tools/backend/stealthInitScript');
   const ctx = newPageContext();
   const printBefore = ctx.print;
-  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
-  expect(ctx.print).toBe(printBefore); // unchanged
+  // Capture setTimeout calls so we can prove C3 (not C4) installed.
+  // C3's deferred function calls setTimeout; C4's wrapper does not.
+  let setTimeoutCalls = 0;
+  vm.runInContext(`globalThis.setTimeout = (fn, ms) => { globalThis.__stCount = (globalThis.__stCount || 0) + 1; return 0; };`, ctx);
+  vm.runInContext(buildStealthInitScript({ stealth: true, suppressFocus: false }), ctx);
+  // C3 replaced print with a non-native deferred wrapper.
+  expect(ctx.print).not.toBe(printBefore);
+  expect(typeof ctx.print).toBe('function');
+  // Calling it must NOT throw and must schedule a deferred check via setTimeout.
+  expect(() => ctx.print()).not.toThrow();
+  setTimeoutCalls = vm.runInContext('globalThis.__stCount || 0', ctx);
+  expect(setTimeoutCalls).toBeGreaterThanOrEqual(1);
 });
 
 test('stealth init: __chromeStealth idempotency guard — second run is a no-op', () => {
@@ -233,11 +248,11 @@ test('stealth init: third-party-frame guard — script does not throw with no DO
   // pieces it CAN (chrome stubs, deferred print) without aborting on a
   // missing global. This is the regression test for Sapoto #1036.
   //
-  // Post-Sapoto #1044: C3 deferred-print is gated on suppressFocus, so this
-  // test builds with both stealth=true AND suppressFocus=true to cover the
-  // full third-party-frame surface that pre-#1044 was always installed.
+  // Post-Sapoto #1044 codex P2: C3 deferred-print is gated on `stealth`
+  // (its original M3 home), so the credentials-mode shape (stealth=true,
+  // suppressFocus=false) is the canonical third-party-frame surface.
   const { buildStealthInitScript } = require('../../packages/playwright-core/src/tools/backend/stealthInitScript');
-  const script = buildStealthInitScript({ stealth: true, suppressFocus: true });
+  const script = buildStealthInitScript({ stealth: true, suppressFocus: false });
   const minimal: any = {};
   vm.createContext(minimal);
   vm.runInContext(`globalThis.window = globalThis; globalThis.setTimeout = () => 0;`, minimal);

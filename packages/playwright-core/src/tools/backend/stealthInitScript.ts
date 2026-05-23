@@ -241,7 +241,7 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
   }
   ` : ''}
 
-  ${suppressFocus ? `
+  ${stealth ? `
   // ============================================================
   // C3 — Deferred window.print() + Path D srcdoc-iframe bridge (#1006)
   // ============================================================
