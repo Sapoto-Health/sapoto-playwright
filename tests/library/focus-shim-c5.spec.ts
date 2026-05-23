@@ -14,21 +14,26 @@
  * limitations under the License.
  *
  * --------------------------------------------------------------------------
- * FocusShim C5 — window.open focus-steal shim (Sapoto #1036, refactor #1043)
+ * FocusShim C5 — window.open focus-steal shim (Sapoto #1036, refactor #1043, #1044)
  *
  * The C5 block in `packages/playwright-core/src/tools/backend/stealthInitScript.ts`
- * (lines 387-625) replaces `window.open` when `suppressFocus: true`. Behavior
- * matrix the shim must hold (per the block's header comment):
+ * replaces `window.open` when `suppressFocus: true`. Behavior matrix the shim
+ * must hold (per the block's header comment):
  *
  *   window.open(_self|_parent|_top)               → native passthrough
  *   window.open('')      unnamed (_blank)         → print-capture proxy
  *   window.open('')      named (e.g. helpWindow)  → native passthrough (5fe607ce4)
- *   window.open(downloadUrl, *)  same-origin      → fetch(); return null
- *   window.open(downloadUrl, *)  same-origin, fetch fails / non-OK
- *                                                 → <a download> synth (b7e783a35)
- *   window.open(downloadUrl, *)  cross-origin     → native passthrough
+ *   window.open(downloadUrl, *)  same-origin      → [FocusShim] background-open marker; return null
+ *   window.open(downloadUrl, *)  cross-origin     → [FocusShim] background-open marker; return null
+ *   window.open(downloadUrl, *)  unparseable URL  → native passthrough (defensive)
  *   window.open(other)                            → native passthrough
  *   (any call) Electron bridge present            → native passthrough (dd3a5e86a)
+ *
+ * Post-#1044 the same-origin fetch()/«a download» branch is replaced by a
+ * console.warn marker that Sapoto's main process catches and routes to a
+ * hidden CDP target via Target.createTarget({background:true}). Cross-origin
+ * download URLs now route the same way (previously fell through to native
+ * with a documented focus-steal trade-off).
  *
  * Plus: with suppressFocus=false the entire C5 block is omitted from the script
  * source (the IIFE only emits C4+C5 when the flag is set), so the production
@@ -249,11 +254,12 @@ test('stealth=false + suppressFocus=true still installs C5 FocusShim (chrome-mod
   // window.open was replaced.
   expect(ctx.open).not.toBe(nativeOpen);
 
-  // And functionally: a download-like same-origin URL routes through fetch
-  // (the chrome-mode download path) rather than native window.open.
+  // And functionally: a download-like same-origin URL emits the
+  // background-open marker (the chrome-mode download path) rather than
+  // calling native window.open.
   ctx.__warnings.length = 0;
   const result = callShimOpen(ctx, 'https://example.com/portal/account/statement.pdf', '_blank');
-  expect(ctx.__fetchCalls).toHaveLength(1);
+  expect(ctx.__warnings.some((w: string) => w.startsWith('[FocusShim] background-open '))).toBe(true);
   expect(ctx.__nativeOpenCalls).toHaveLength(0);
   expect(result).toBeNull();
 
@@ -361,95 +367,119 @@ test('_self/_parent/_top targets always delegate to native (no focus-steal)', ()
 });
 
 // ------------------------------------------------------------------
-// Scenario 4 — same-origin download URL → fetch path
+// Scenario 4 — same-origin download URL → [FocusShim] background-open marker
 // ------------------------------------------------------------------
+//
+// Post-#1044 the fetch()-based capture path is removed. The shim emits a
+// console.warn marker that Sapoto's main process catches via
+// Runtime.consoleAPICalled and routes to Target.createTarget({background:true}).
+// The marker text is verbatim contractually:
+//
+//   [FocusShim] background-open <absolute-url>
+//
+// Sapoto's parser slices on the literal prefix '[FocusShim] background-open '
+// (note: trailing space). If you change the prefix here you MUST also change
+// the BACKGROUND_OPEN_MARKER constant in src/main/downloads/backgroundOpenBridge.ts
+// or the Sapoto-side handler will silently stop catching these.
 
-test('same-origin download URL triggers fetch() and returns null', async () => {
+test('same-origin download URL emits [FocusShim] background-open marker and returns null', () => {
   const ctx = newShimContext({ locationOrigin: 'https://example.com', locationHref: 'https://example.com/portal' });
   installShim(ctx, true);
   ctx.__warnings.length = 0;
 
   const result = callShimOpen(ctx, 'https://example.com/download/statement-2026.pdf', '_blank');
 
-  // Shim returns null per spec.
+  // Shim returns null per spec — page sees no Window reference, no focus steal.
   expect(result).toBeNull();
   // No native open call — the focus-steal was prevented.
   expect(ctx.__nativeOpenCalls).toHaveLength(0);
-  // Exactly one fetch with credentials:'include'.
-  expect(ctx.__fetchCalls).toHaveLength(1);
-  expect(ctx.__fetchCalls[0].input).toBe('https://example.com/download/statement-2026.pdf');
-  expect(ctx.__fetchCalls[0].init).toMatchObject({ credentials: 'include' });
-  // Diagnostic marker.
-  expect(ctx.__warnings.some((w: string) => w.includes('→ fetch url='))).toBe(true);
+  // No fetch() call — the fetch() mechanism is gone post-#1044.
+  expect(ctx.__fetchCalls).toHaveLength(0);
 
-  // Resolve fetch OK — no <a download> synthesis should follow.
-  await resolveFetch(ctx, 0, { ok: true, status: 200 });
-  expect(ctx.__appendedChildren).toHaveLength(0);
+  // Marker emitted with the absolute URL. Verbatim match on the contract
+  // string — Sapoto's parser uses '[FocusShim] background-open ' (note the
+  // trailing space) as a startsWith() prefix and slices the URL off the end.
+  const markers = ctx.__warnings.filter((w: string) => w.startsWith('[FocusShim] background-open '));
+  expect(markers).toHaveLength(1);
+  expect(markers[0]).toBe('[FocusShim] background-open https://example.com/download/statement-2026.pdf');
+
+  // Diagnostic marker (the `→ background-open url=` line, with sanitized URL).
+  expect(ctx.__warnings.some((w: string) => w.includes('→ background-open url='))).toBe(true);
 });
 
-test('DOWNLOAD_PATH_RE matches a /statements/ URL even without a file extension', async () => {
+test('DOWNLOAD_PATH_RE matches a /statements/ URL even without a file extension', () => {
   const ctx = newShimContext({ locationOrigin: 'https://example.com', locationHref: 'https://example.com/portal' });
   installShim(ctx, true);
 
   callShimOpen(ctx, 'https://example.com/statements/2026-may', '_blank');
-  expect(ctx.__fetchCalls).toHaveLength(1);
+  expect(ctx.__warnings.some((w: string) => w.startsWith('[FocusShim] background-open '))).toBe(true);
   expect(ctx.__nativeOpenCalls).toHaveLength(0);
-  await resolveFetch(ctx, 0, { ok: true });
 });
 
 // ------------------------------------------------------------------
-// Scenario 5 — HTTP-error response → <a download> fallback (b7e783a35)
+// Scenario 5 — cross-origin download URL also emits background-open marker
 // ------------------------------------------------------------------
+//
+// Pre-#1044 cross-origin URLs fell through to native window.open and accepted
+// one focus-steal because fetch() would CORS-block. Post-#1044 we route them
+// to a hidden CDP target same as same-origin — the new target shares the
+// browserContextId so cookies follow, and there's no focus steal because
+// background:true. This closes the "one popup per cross-origin download"
+// trade-off documented in #1043.
 
-test('HTTP non-OK response falls back to <a download> synthesis', async () => {
+test('cross-origin download URL also emits background-open marker (no native call)', () => {
   const ctx = newShimContext({ locationOrigin: 'https://example.com', locationHref: 'https://example.com/portal' });
   installShim(ctx, true);
   ctx.__warnings.length = 0;
 
-  callShimOpen(ctx, 'https://example.com/download/q4-report.pdf', '_blank');
-  expect(ctx.__fetchCalls).toHaveLength(1);
+  const result = callShimOpen(ctx, 'https://cdn.other.example/download/statement.pdf', '_blank');
 
-  await resolveFetch(ctx, 0, { ok: false, status: 403 });
-
-  // <a download> was synthesized, appended, clicked.
-  expect(ctx.__appendedChildren).toHaveLength(1);
-  const anchor = ctx.__appendedChildren[0];
-  expect(anchor.tag).toBe('a');
-  expect(anchor.href).toBe('https://example.com/download/q4-report.pdf');
-  expect(anchor.download).toBe('');
-  expect(anchor.rel).toBe('noopener noreferrer');
-  expect(anchor.clicked).toBe(true);
-  // Diagnostic marker for the fallback path (line 448).
-  expect(ctx.__warnings.some((w: string) => w.includes('fetch unsuccessful: HTTP 403'))).toBe(true);
-});
-
-test('Network-error rejection (CORS preflight failure proxy) also triggers <a download> fallback', async () => {
-  const ctx = newShimContext({ locationOrigin: 'https://example.com', locationHref: 'https://example.com/portal' });
-  installShim(ctx, true);
-  ctx.__warnings.length = 0;
-
-  callShimOpen(ctx, 'https://example.com/download/cors-blocked.pdf', '_blank');
-  await resolveFetch(ctx, 0, null); // null → reject('network error')
-
-  expect(ctx.__appendedChildren).toHaveLength(1);
-  expect(ctx.__appendedChildren[0].clicked).toBe(true);
-  expect(ctx.__warnings.some((w: string) => w.includes('fetch unsuccessful: network error'))).toBe(true);
-});
-
-// ------------------------------------------------------------------
-// Scenario 6 — cross-origin download URL → native passthrough
-// ------------------------------------------------------------------
-
-test('cross-origin download URL delegates to native (no fetch issued)', () => {
-  const ctx = newShimContext({ locationOrigin: 'https://example.com', locationHref: 'https://example.com/portal' });
-  installShim(ctx, true);
-  ctx.__warnings.length = 0;
-
-  callShimOpen(ctx, 'https://cdn.other.example/download/statement.pdf', '_blank');
-
+  expect(result).toBeNull();
+  expect(ctx.__nativeOpenCalls).toHaveLength(0);
   expect(ctx.__fetchCalls).toHaveLength(0);
-  expect(ctx.__nativeOpenCalls).toHaveLength(1);
-  expect(ctx.__warnings.some((w: string) => w.includes('cross-origin download URL'))).toBe(true);
+
+  const markers = ctx.__warnings.filter((w: string) => w.startsWith('[FocusShim] background-open '));
+  expect(markers).toHaveLength(1);
+  expect(markers[0]).toBe('[FocusShim] background-open https://cdn.other.example/download/statement.pdf');
+});
+
+test('Relative download URL is resolved to absolute before emitting marker', () => {
+  // Sapoto's bridge needs absolute URLs to pass to Target.createTarget. The
+  // shim resolves relative URLs against location.href so the parser doesn't
+  // have to know the page origin.
+  const ctx = newShimContext({ locationOrigin: 'https://example.com', locationHref: 'https://example.com/portal/account' });
+  installShim(ctx, true);
+  ctx.__warnings.length = 0;
+
+  callShimOpen(ctx, '/download/statement.pdf', '_blank');
+
+  const markers = ctx.__warnings.filter((w: string) => w.startsWith('[FocusShim] background-open '));
+  expect(markers).toHaveLength(1);
+  expect(markers[0]).toBe('[FocusShim] background-open https://example.com/download/statement.pdf');
+});
+
+// Codex P1 fix — the marker must preserve query strings and URL fragments
+// verbatim. The previous implementation passed the URL through sanitizeUrl()
+// which strips `?...#...`. That broke portals that encode statement ids or
+// signed auth tokens in the query string: the bridge would see
+// `/download` instead of `/download?id=123&token=abc`, then either open the
+// wrong URL or get a 401. The marker carries the navigation target consumed
+// by Sapoto's bridge; sanitization of sensitive params is owned by
+// `src/main/redaction/` on the remote-log shipping path, not here.
+test('Marker preserves query string and hash for statement-id / signed-token URLs', () => {
+  const ctx = newShimContext({ locationOrigin: 'https://example.com', locationHref: 'https://example.com/portal' });
+  installShim(ctx, true);
+  ctx.__warnings.length = 0;
+
+  callShimOpen(
+      ctx,
+      'https://example.com/download?id=123&token=abc#section',
+      '_blank');
+
+  const markers = ctx.__warnings.filter((w: string) => w.startsWith('[FocusShim] background-open '));
+  expect(markers).toHaveLength(1);
+  // Verbatim — query and hash must round-trip through the marker.
+  expect(markers[0]).toBe('[FocusShim] background-open https://example.com/download?id=123&token=abc#section');
 });
 
 // ------------------------------------------------------------------
@@ -490,10 +520,11 @@ test('Electron bridge stub with non-function requestPrintCapture does NOT bypass
   // script that sets { requestPrintCapture: 1 } must not disable focus suppression.
   const ctx = newShimContext({ electronBridge: 'truthy-but-not-fn', locationOrigin: 'https://example.com', locationHref: 'https://example.com/portal' });
   installShim(ctx, true);
+  ctx.__warnings.length = 0;
 
   callShimOpen(ctx, 'https://example.com/download/statement.pdf', '_blank');
-  // Fetch path ran (shim was active despite the truthy-but-malformed bridge).
-  expect(ctx.__fetchCalls).toHaveLength(1);
+  // Background-open marker emitted (shim was active despite the truthy-but-malformed bridge).
+  expect(ctx.__warnings.some((w: string) => w.startsWith('[FocusShim] background-open '))).toBe(true);
   expect(ctx.__nativeOpenCalls).toHaveLength(0);
 });
 
@@ -502,10 +533,11 @@ test('Electron bridge access via throwing getter is treated as no bridge', () =>
   // throws. A hostile getter therefore cannot pretend to be the bridge.
   const ctx = newShimContext({ electronBridge: 'getter-throws', locationOrigin: 'https://example.com', locationHref: 'https://example.com/portal' });
   installShim(ctx, true);
+  ctx.__warnings.length = 0;
 
   callShimOpen(ctx, 'https://example.com/download/statement.pdf', '_blank');
-  // Fetch path ran — the throwing getter did NOT pretend to be the bridge.
-  expect(ctx.__fetchCalls).toHaveLength(1);
+  // Background-open marker emitted — the throwing getter did NOT pretend to be the bridge.
+  expect(ctx.__warnings.some((w: string) => w.startsWith('[FocusShim] background-open '))).toBe(true);
   expect(ctx.__nativeOpenCalls).toHaveLength(0);
 });
 

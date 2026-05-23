@@ -405,7 +405,7 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
   } catch (_) {}
 
   // ============================================================
-  // C5 — window.open focus-steal shim (Sapoto #1036, refactor #1043)
+  // C5 — window.open focus-steal shim (Sapoto #1036, refactor #1043, #1044)
   // ============================================================
   // Page-level window.open(url, '_blank') (or any non-_self target) routes
   // through Chromium's Browser::AddNewContents → NativeWidgetMac::Activate →
@@ -414,16 +414,25 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
   // open-focus-steal.md.
   //
   // The shim handles focus-steal suppression only. Download capture is
-  // decoupled: the same-origin fetch issued for download-y URLs is caught
-  // by Sapoto's Layer 1 CDP Fetch.enable interception, so no bytes flow
-  // through this script.
+  // decoupled: we emit a [FocusShim] background-open <url> marker that
+  // Sapoto's main process catches via Runtime.consoleAPICalled and uses to
+  // spawn a hidden CDP target via Target.createTarget with background:true.
+  // The hidden target renders the URL naturally — Layer 1 (Fetch.enable)
+  // catches PDF bytes, Layer 4 (printCapture) catches HTML-auto-print, and
+  // Layer 2 catches in-tab downloads. No focus steal because background:true.
+  //
+  // This replaces the pre-#1044 fetch() mechanism: fetch() worked for URLs
+  // that serve PDF bytes directly, but Netflix-style /invoice/print/<id>
+  // endpoints return HTML that auto-calls window.print() — fetch() retrieved
+  // the HTML silently and Layer 1 (which only handles PDF) produced nothing.
+  // Routing to a real hidden target lets the existing layer stack do its job.
   //
   // Scope:
-  //   - window.open(_self|_parent|_top)         → native passthrough
-  //   - window.open('')                          → print-capture proxy (unnamed only)
-  //   - window.open(downloadUrl, *) same-origin  → fetch(); return null
-  //   - window.open(downloadUrl, *) cross-origin → native passthrough
-  //   - window.open(other)                       → native passthrough
+  //   - window.open(_self|_parent|_top)          → native passthrough
+  //   - window.open('')                           → print-capture proxy (unnamed only)
+  //   - window.open(downloadUrl, *) same-origin   → background-open marker; return null
+  //   - window.open(downloadUrl, *) cross-origin  → background-open marker; return null
+  //   - window.open(other)                        → native passthrough
   try {
     const _markNative = (window).__stealthMarkNative || function(fn) { return fn; };
 
@@ -448,46 +457,20 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
       return false;
     };
 
-    const _fetchAndForget = function(href) {
-      fetch(href, { credentials: 'include' }).then(function(resp) {
-        // fetch() only rejects on network errors — HTTP 4xx/5xx resolve
-        // normally with resp.ok === false. Some portals gate downloads on
-        // Sec-Fetch-Mode: navigate (window.open / <a download>) versus
-        // Sec-Fetch-Mode: cors (fetch), so fetch can return 401/403 while
-        // a real navigation would have succeeded. Re-throw on non-OK so
-        // the unified .catch() below synthesizes the <a download> fallback.
-        if (!resp || !resp.ok) {
-          const status = resp ? resp.status : 'no-response';
-          throw new Error('HTTP ' + status);
-        }
-        // Layer 1's CDP Fetch.enable has already captured the bytes by the
-        // time the response resolves here. We don't need to read resp.body.
-        return resp;
-      }).catch(function(err) {
-        const msg = (err && err.message) ? err.message : String(err);
-        try { console.warn('[FocusShim] fetch unsuccessful: ' + msg + ' — falling back to <a download>'); } catch (_) {}
-        // Same-origin pre-check can mask a 302 to a cross-origin signed CDN
-        // (common bank-portal pattern). fetch() defaults to mode:'cors' and
-        // blocks on missing CORS headers; <a download>.click() goes through
-        // Chromium's URL handler which doesn't apply CORS to downloads, so
-        // the redirect is followed and Content-Disposition triggers a real
-        // download. This restores the pre-refactor Layer 2 capture path.
-        try {
-          const a = document.createElement('a');
-          a.href = href;
-          a.download = '';
-          a.rel = 'noopener noreferrer';
-          a.style.display = 'none';
-          (document.body || document.documentElement).appendChild(a);
-          a.click();
-          setTimeout(function() {
-            try { a.remove(); } catch (_) {}
-          }, 0);
-        } catch (fallbackErr) {
-          const fmsg = (fallbackErr && fallbackErr.message) ? fallbackErr.message : String(fallbackErr);
-          try { console.warn('[FocusShim] <a download> fallback also failed: ' + fmsg); } catch (_) {}
-        }
-      });
+    // Emit a marker that Sapoto's main process catches via
+    // Runtime.consoleAPICalled and routes to Target.createTarget({background:true}).
+    // The hidden target renders the URL — Layer 1 catches PDFs, Layer 4 catches
+    // HTML-auto-print. Lifecycle (attach, 30s timeout, close-on-capture) is
+    // owned by the Sapoto-side backgroundOpenBridge.ts.
+    //
+    // The marker carries the navigation target consumed by Sapoto's bridge.
+    // sanitizeUrl() would strip query/hash that may carry the statement id or
+    // signed auth token — emitting /download for /download?id=123&token=abc
+    // would make the bridge open the wrong URL or 401. Emit the full absolute
+    // URL here; existing src/main/redaction/ handles remote-log sanitization
+    // for any sensitive params before shipping.
+    const _emitBackgroundOpen = function(href) {
+      try { console.warn('[FocusShim] background-open ' + href); } catch (_) {}
     };
 
     const _printCaptureProxy = function() {
@@ -594,21 +577,29 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
         return _printCaptureProxy();
       }
 
-      // Download-y URL → same-origin fetch caught by Layer 1's CDP
-      // Fetch.enable. Cross-origin falls through to native (CORS would
-      // block the fetch anyway; focus-steal accepted for that one popup).
+      // Download-y URL → emit background-open marker. Sapoto's main process
+      // catches the marker and spawns a hidden CDP target via
+      // Target.createTarget({background:true, browserContextId}) — the new
+      // target renders the URL naturally with full cookie context (shared
+      // browserContextId), so Layer 1 catches PDF bytes via Fetch.enable and
+      // Layer 4 catches HTML-auto-print via its console marker. Both
+      // same-origin and cross-origin URLs route the same way now: spawning
+      // a hidden target is the right primitive regardless of origin, and it
+      // closes the pre-#1044 "accepted focus-steal for one cross-origin
+      // popup" trade-off.
       if (_urlLooksLikeDownload(u)) {
+        let absoluteUrl = u;
         try {
-          if (new URL(u, location.href).origin !== location.origin) {
-            try { console.warn('[FocusShim] → native (cross-origin download URL)'); } catch (_) {}
-            return _nativeOpen(url, target, features);
-          }
+          absoluteUrl = new URL(u, location.href).href;
         } catch (_) {
+          // Unparseable URL — bridge would reject it anyway. Fall through to
+          // native so the page sees the same behavior the unshimmed browser
+          // would have produced (focus-steal, but at least correct semantics).
           try { console.warn('[FocusShim] → native (invalid URL)'); } catch (_) {}
           return _nativeOpen(url, target, features);
         }
-        try { console.warn('[FocusShim] → fetch url=' + sanitizeUrl(u)); } catch (_) {}
-        _fetchAndForget(u);
+        try { console.warn('[FocusShim] → background-open url=' + sanitizeUrl(absoluteUrl)); } catch (_) {}
+        _emitBackgroundOpen(absoluteUrl);
         return null;
       }
 
