@@ -281,17 +281,63 @@ export type Config = {
   keepBrowserAlive?: boolean;
 
   /**
-   * CDP stealth mode. When true, Playwright minimizes its CDP-domain
-   * footprint (skips Log.enable, gates Network.enable on request interception,
-   * rapid-cycles Runtime.enable around context discovery) and injects an
-   * init script that masks common automation tells (navigator.webdriver,
-   * chrome.app/csi/loadTimes, navigator.languages, Notification.permission,
-   * Chrome UA brand hints, a deferred window.print override).
+   * @deprecated Sapoto PRD #1045 / Tracer A2 — single-boolean alias kept for
+   * one release cycle. The new surface is the decomposed flag set below
+   * (`cdpStealth`, `printCapture`, `chromeRuntimeStubs`, `focusEmulation`).
    *
-   * Defaults to true. Disable via --no-stealth on the CLI or `stealth: false`
-   * in the config file. The full r1226 fingerprint audit lives as a TODO —
-   * stubs were validated against r1212 (sync/upstream-1.61 merge base) and
-   * may need pruning as Chromium rolls forward.
+   *   - `stealth: true`  → equivalent to `cdpStealth: ['runtime-cycle',
+   *                        'log-skip', 'worker-runtime']`. The `--stealth`
+   *                        CLI flag and `PLAYWRIGHT_MCP_STEALTH=1` env var
+   *                        still work through this alias.
+   *   - `stealth: false` → equivalent to `cdpStealth: []`. The `--no-stealth`
+   *                        CLI flag and `PLAYWRIGHT_MCP_STEALTH=0` env var
+   *                        still work through this alias.
+   *
+   * Explicit `cdpStealth` always wins over `stealth` when both are set
+   * (mirrors resolveCdpStealthAlias() precedence).
    */
   stealth?: boolean;
+
+  /**
+   * Sapoto PRD #1045 / Tracer A2 — decomposed CDP-stealth feature set. Each
+   * entry maps to one specific CDP-domain mitigation that was previously
+   * bundled inside the legacy `stealth: true` boolean:
+   *
+   *   - 'runtime-cycle'  — rapid Runtime.enable→disable cycle around context
+   *                        discovery (keeps the long-lived Runtime domain
+   *                        dark to page scripts after attach).
+   *   - 'log-skip'       — skip Log.enable entirely.
+   *   - 'worker-runtime' — apply the runtime-cycle pattern to worker targets.
+   *
+   * `network-skip` is intentionally NOT a valid entry — Codex P1 review on
+   * PR #28 removed Network.enable gating because it broke
+   * `page.on('request')` listeners. Pass it and the CLI parser throws.
+   */
+  cdpStealth?: string[];
+
+  /**
+   * Sapoto PRD #1045 / Tracer A2 — gates Path D `window.print` override and
+   * the matching console marker bridge. Default: off (the previous-generation
+   * `stealth: true` enabled it unconditionally; A2 splits it out because
+   * it has measurable cost on print-heavy pages even when stealth is on).
+   * A3 / A5 read this off `BrowserOptions.printCapture`.
+   */
+  printCapture?: boolean;
+
+  /**
+   * Sapoto PRD #1045 / Tracer A2 — gates the
+   * chrome.app/chrome.csi/chrome.loadTimes/Notification.permission stubs
+   * injected by `CDP_STEALTH_INIT_SCRIPT`. Default: on. Pass
+   * `chromeRuntimeStubs: false` (or `--chrome-runtime-stubs=off`) to skip
+   * the stubs while keeping other stealth behaviors active.
+   */
+  chromeRuntimeStubs?: boolean;
+
+  /**
+   * Sapoto PRD #1045 / Tracer A2 — gates the
+   * `Emulation.setFocusEmulationEnabled(true)` call A1's BrowserOptions
+   * routes through. Default: on. Pass `focusEmulation: false` (or
+   * `--focus-emulation=off`) to fall back to OS-level focus handling.
+   */
+  focusEmulation?: boolean;
 };

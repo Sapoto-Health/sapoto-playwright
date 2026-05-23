@@ -17,6 +17,7 @@
 import { Option as ProgramOption } from 'commander';
 import * as mcpServer from '../utils/mcp/server';
 import { commaSeparatedList, dotenvFileLoader, enumParser, headerParser, numberParser, resolutionParser, resolveCLIConfigForMCP, semicolonSeparatedList } from './config';
+import { parseCdpStealthCLI } from '@isomorphic/cdpStealthCLIParser';
 import { setupExitWatchdog } from './watchdog';
 import { createBrowserWithInfo } from './browserFactory';
 import { BrowserBackend } from '../backend/browserBackend';
@@ -76,7 +77,31 @@ export function decorateMCPCommand(command: Command) {
       .option('--snapshot-mode <mode>', 'when taking snapshots for responses, specifies the mode to use. Can be "full" or "none". Default is "full".')
       .option('--storage-state <path>', 'path to the storage state file for isolated sessions.')
       .option('--suppress-focus', 'suppress focus-stealing: skip bringToFront during tab selection (paired stealth init script is applied separately)')
-      .option('--no-stealth', 'disable CDP stealth mode (default on). Stealth minimizes CDP-domain footprint and injects an init script that masks navigator.webdriver, chrome.app/csi/loadTimes, UA brand hints, and Notification.permission to evade bot detection (DataDome, Akamai, Cloudflare Turnstile).')
+      // PRD #1045 / Tracer A2 — decomposed CDP-stealth flag surface. See
+      // packages/isomorphic/cdpStealthCLIParser.ts for the per-feature
+      // rationale and the rejection of `network-skip`.
+      .option('--cdp-stealth <list>', 'comma-separated list of CDP-stealth features to enable. Allowed values: "runtime-cycle", "log-skip", "worker-runtime", "all" (= all three), or empty (= none). Replaces the legacy --stealth/--no-stealth boolean; those remain as one-cycle aliases for "all" / empty.', parseCdpStealthCLI)
+      .option('--print-capture', 'enable the deferred window.print override and the matching console-marker bridge (Path D). Default: off.')
+      .option('--chrome-runtime-stubs <mode>', 'gate chrome.app/chrome.csi/chrome.loadTimes/Notification.permission stubs. Can be "on" or "off". Default is "on".', enumParser.bind(null, '--chrome-runtime-stubs', ['on', 'off']))
+      .option('--focus-emulation <mode>', 'gate Emulation.setFocusEmulationEnabled(true). Can be "on" or "off". Default is "on".', enumParser.bind(null, '--focus-emulation', ['on', 'off']))
+      // PRD #1045 / Tracer A2 — legacy boolean alias kept for one release
+      // cycle. We declare both `--stealth` and `--no-stealth` as separate
+      // options (not commander's `--no-X` convention, which would block
+      // direct registration of the positive form) and reconcile them in
+      // the .action normalization step below.
+      //
+      // Three input states (commander folds both flags onto `options.stealth`
+      // because they're declared as a positive `--stealth` + a `--no-stealth`
+      // pair; commander uses `--no-<X>` as the negation of <X>, so the parsed
+      // shape is the single tri-state field below, not a separate `noStealth`):
+      //   - --stealth passed       → options.stealth === true   (force-on)
+      //   - --no-stealth passed    → options.stealth === false  (force-off)
+      //   - neither passed         → options.stealth === undefined (no override)
+      //
+      // resolveStealthAlias() expands the boolean into a cdpStealth wire
+      // payload. `--cdp-stealth=...` takes precedence over both aliases.
+      .option('--stealth', '[deprecated] alias for --cdp-stealth=all. Kept for one release cycle. The stealth bundle minimizes the CDP-domain footprint and pairs with the init script that masks navigator.webdriver, chrome.app/csi/loadTimes, UA brand hints, and Notification.permission to evade bot detection (DataDome, Akamai, Cloudflare Turnstile).')
+      .option('--no-stealth', '[deprecated] alias for --cdp-stealth= (no features). Kept for one release cycle.')
       .option('--test-id-attribute <attribute>', 'specify the attribute to use for test ids, defaults to "data-testid"')
       .option('--timeout-action <timeout>', 'specify action timeout in milliseconds, defaults to 5000ms', numberParser)
       .option('--timeout-download <timeout>', 'specify download completion timeout in milliseconds, defaults to 30000ms', numberParser)
@@ -95,11 +120,26 @@ export function decorateMCPCommand(command: Command) {
         // previous shape collapsed it to `false`, silently stomping an env/config `true`.
         options.humanizeInput = options.humanizeInput === undefined ? undefined : ((options.humanizeInput as unknown as string) === 'on');
 
-        // normalize --no-stealth: stealth = true => nothing was passed (commander's default for a
-        // --no- flag), stealth = false => --no-stealth was explicitly passed. Map the default-true
-        // case to undefined so env (PLAYWRIGHT_MCP_STEALTH) / config-file `stealth: false` aren't
-        // stomped by configFromCLIOptions re-asserting `true` on every invocation.
-        options.stealth = options.stealth === true ? undefined : false;
+        // PRD #1045 / Tracer A2 — normalize the legacy --stealth / --no-stealth
+        // boolean aliases. Both flags are declared above and commander folds
+        // them onto the single `options.stealth` tri-state (its `--no-<X>`
+        // convention is the negation of `--<X>`), so the parser reports three
+        // input states cleanly:
+        //   - options.stealth === true  → user passed `--stealth` (explicit on).
+        //                                 resolveStealthAlias() expands this
+        //                                 to the full 3-feature bundle.
+        //   - options.stealth === false → user passed `--no-stealth` (explicit
+        //                                 off). resolveStealthAlias() expands
+        //                                 this to `cdpStealth: []`.
+        //   - options.stealth === undefined → neither passed. No emit; env /
+        //                                 config-file values flow through merge.
+        // No normalization needed — commander already produces the right shape.
+
+        // normalize --chrome-runtime-stubs / --focus-emulation enums to booleans.
+        // Same pattern as --humanize-input above: emit only when defined so
+        // env / config-file defaults survive merge. PRD #1045 / Tracer A2.
+        options.chromeRuntimeStubs = options.chromeRuntimeStubs === undefined ? undefined : ((options.chromeRuntimeStubs as unknown as string) === 'on');
+        options.focusEmulation = options.focusEmulation === undefined ? undefined : ((options.focusEmulation as unknown as string) === 'on');
 
         setupExitWatchdog();
 

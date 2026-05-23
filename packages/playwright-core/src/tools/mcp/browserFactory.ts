@@ -110,18 +110,49 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
   // path it has to be threaded through connectOverCDP separately.
   // Fork extensions on public LaunchOptions / ConnectOverCDPOptions surfaces:
   // PRD #1045 / Tracer A1: still reads the legacy `stealthMode` boolean from
-  // launchOptions and forwards it. The client-side `resolveCdpStealthAlias`
-  // turns it into the new `cdpStealth: string[]` wire field. A2 will replace
-  // the CLI / launchOptions surface with the structured feature set.
-  const launchOptionsWithFork = config.browser.launchOptions as (playwrightTypes.LaunchOptions & { stealthMode?: boolean }) | undefined;
+  // launchOptions and forwards it for one release cycle. The client-side
+  // `resolveCdpStealthAlias` turns it into the new `cdpStealth: string[]` wire
+  // field.
+  // PRD #1045 / Tracer A2: also forwards the new decomposed surface (cdpStealth /
+  // printCapture / chromeRuntimeStubs / focusEmulation). configFromCLIOptions
+  // writes all four onto `config.browser.launchOptions`; the connectOverCDP
+  // channel accepts them (validator.ts BrowserTypeConnectOverCDPParams), so this
+  // function just needs to copy them through. Without this the --cdp-endpoint
+  // attach path silently drops every new field and the user sees the unstealthed
+  // default no matter what they pass on the CLI.
+  const launchOptionsWithFork = config.browser.launchOptions as (playwrightTypes.LaunchOptions & {
+    stealthMode?: boolean,
+    cdpStealth?: string[],
+    printCapture?: boolean,
+    chromeRuntimeStubs?: boolean,
+    focusEmulation?: boolean,
+  }) | undefined;
   const stealthMode = launchOptionsWithFork?.stealthMode === true;
-  const connectOptions: playwrightTypes.ConnectOverCDPOptions & { stealthMode?: boolean, suppressFocus?: boolean } = {
+  const connectOptions: playwrightTypes.ConnectOverCDPOptions & {
+    stealthMode?: boolean,
+    cdpStealth?: string[],
+    printCapture?: boolean,
+    chromeRuntimeStubs?: boolean,
+    focusEmulation?: boolean,
+    suppressFocus?: boolean,
+  } = {
     headers: config.browser.cdpHeaders,
     timeout: config.browser.cdpTimeout,
     artifactsDir,
   };
   if (stealthMode)
     connectOptions.stealthMode = true;
+  // PRD #1045 / Tracer A2 — forward the decomposed fields. Mirror the
+  // configFromCLIOptions "emit when defined" pattern so undefined doesn't stomp
+  // any client-side alias resolution happening downstream in the channel layer.
+  if (launchOptionsWithFork?.cdpStealth !== undefined)
+    connectOptions.cdpStealth = launchOptionsWithFork.cdpStealth;
+  if (launchOptionsWithFork?.printCapture !== undefined)
+    connectOptions.printCapture = launchOptionsWithFork.printCapture;
+  if (launchOptionsWithFork?.chromeRuntimeStubs !== undefined)
+    connectOptions.chromeRuntimeStubs = launchOptionsWithFork.chromeRuntimeStubs;
+  if (launchOptionsWithFork?.focusEmulation !== undefined)
+    connectOptions.focusEmulation = launchOptionsWithFork.focusEmulation;
   // Sapoto #1036: when --suppress-focus is set, thread it through so the chromium
   // server emits `Target.createTarget { background: true }` and Chrome does not
   // steal OS focus on `browser_tabs { action: "new" }`.
