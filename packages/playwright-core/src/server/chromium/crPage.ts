@@ -557,7 +557,10 @@ class FrameSession {
       // Client Hint brands so navigator.userAgentData.brands matches the binary's
       // major version. Pages can detect automation when the UA-string Chrome version
       // mismatches userAgentData.brands (Playwright doesn't normally set brands).
-      promises.push(this._updateUserAgentBrands());
+      // Gated on !skipDefaultOverrides so connectOverCDP({ noDefaults: true }) callers
+      // who explicitly opted out of default emulation don't get UA brand overrides.
+      if (!skipDefaultOverrides)
+        promises.push(this._updateUserAgentBrands());
       if (options.locale)
         promises.push(emulateLocale(this._client, options.locale));
       if (options.timezoneId)
