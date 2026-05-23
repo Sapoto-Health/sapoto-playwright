@@ -153,6 +153,8 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
     if (this.name() !== 'chromium')
       throw new Error('Connecting over CDP is only supported in Chromium.');
     const headers = params.headers ? headersObjectToArray(params.headers) : undefined;
+    // Fork extension: stealthMode/humanizeInput are wired through the channel but not in the public api types yet.
+    const forkParams = params as api.ConnectOverCDPOptions & { stealthMode?: boolean, humanizeInput?: boolean };
     const result = await this._channel.connectOverCDP({
       endpointURL,
       headers,
@@ -161,8 +163,8 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
       isLocal: params.isLocal,
       noDefaults: params.noDefaults,
       artifactsDir: params.artifactsDir,
-      stealthMode: (params as any).stealthMode,
-      humanizeInput: (params as any).humanizeInput,
+      stealthMode: forkParams.stealthMode,
+      humanizeInput: forkParams.humanizeInput,
     });
     return await this._browserFromConnectResult(result);
   }

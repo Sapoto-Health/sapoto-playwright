@@ -282,8 +282,14 @@ function resolveBrowserParam(browserOption: string | undefined): { browserName?:
 function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: string } {
   const { browserName, channel } = resolveBrowserParam(cliOptions.browser);
 
-  // Launch options
-  const launchOptions: playwrightTypes.LaunchOptions = {
+  // Launch options. Extend the public LaunchOptions surface with the fork-internal
+  // humanizeInput / stealthMode flags — they're plumbed through the channel & server
+  // but not yet part of the published types.
+  type ForkLaunchOptions = playwrightTypes.LaunchOptions & {
+    humanizeInput?: boolean;
+    stealthMode?: boolean;
+  };
+  const launchOptions: ForkLaunchOptions = {
     channel,
     executablePath: cliOptions.executablePath,
     headless: cliOptions.headless,
@@ -296,14 +302,14 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
 
   // --humanize-input on => humanizeInput: true; default off.
   if (cliOptions.humanizeInput === true)
-    (launchOptions as any).humanizeInput = true;
+    launchOptions.humanizeInput = true;
 
   // CDP stealth: default on. `--no-stealth` sets cliOptions.stealth === false.
   // Pass through into launchOptions; the server reads `options.stealthMode` on
   // both the launch path (server/browserType.ts) and the CDP-attach path
   // (chromium/chromium.ts).
   if (cliOptions.stealth !== false)
-    (launchOptions as any).stealthMode = true;
+    launchOptions.stealthMode = true;
 
   if (cliOptions.device && cliOptions.cdpEndpoint)
     throw new Error('Device emulation is not supported with cdpEndpoint.');

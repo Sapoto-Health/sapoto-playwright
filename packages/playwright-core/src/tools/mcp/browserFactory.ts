@@ -77,9 +77,10 @@ export interface BrowserContextFactory {
 }
 
 function browserInfo(browser: playwrightTypes.Browser, config: FullConfig): BrowserInfo {
+  // Internal access: _guid lives on ChannelOwner but is not on the public Browser type.
+  const browserWithGuid = browser as playwrightTypes.Browser & { _guid: string };
   return {
-    // eslint-disable-next-line no-restricted-syntax
-    guid: (browser as any)._guid,
+    guid: browserWithGuid._guid,
     browserName: config.browser.browserName,
     launchOptions: config.browser.launchOptions,
     userDataDir: config.browser.userDataDir
@@ -107,15 +108,17 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
   const artifactsDir = await computeTracesDir(config, clientInfo);
   // CDP stealth flag flows in via launchOptions for the launch path; for the CDP-attach
   // path it has to be threaded through connectOverCDP separately.
-  const stealthMode = (config.browser.launchOptions as any)?.stealthMode === true;
-  const browser = await playwright.chromium.connectOverCDP(config.browser.cdpEndpoint!, {
+  // Fork extensions on public LaunchOptions / ConnectOverCDPOptions surfaces:
+  const launchOptionsWithFork = config.browser.launchOptions as (playwrightTypes.LaunchOptions & { stealthMode?: boolean }) | undefined;
+  const stealthMode = launchOptionsWithFork?.stealthMode === true;
+  const connectOptions: playwrightTypes.ConnectOverCDPOptions & { stealthMode?: boolean } = {
     headers: config.browser.cdpHeaders,
     timeout: config.browser.cdpTimeout,
     artifactsDir,
-    // Cast: stealthMode is plumbed through the channel/server but isn't in the public
-    // ConnectOverCDPOptions surface yet.
-    ...(stealthMode ? { stealthMode: true } as any : {}),
-  });
+  };
+  if (stealthMode)
+    connectOptions.stealthMode = true;
+  const browser = await playwright.chromium.connectOverCDP(config.browser.cdpEndpoint!, connectOptions);
   return browser;
 }
 

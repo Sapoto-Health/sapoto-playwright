@@ -90,7 +90,7 @@ export class CRNetworkManager {
     // active — when Fetch.requestPaused is in play, the relay correlates by `networkId`,
     // which is only emitted when Network.enable is on. Without that correlation, paused
     // requests hang.
-    const stealthMode = !!(this._page?.browserContext as any)?._browser?.options?.stealthMode;
+    const stealthMode = !!this._page?.browserContext?._browser?.options?.stealthMode;
     const needsNetwork = !stealthMode || this._protocolRequestInterceptionEnabled;
     const promises: Promise<any>[] = [];
     if (needsNetwork)
@@ -170,7 +170,7 @@ export class CRNetworkManager {
     // CDP Stealth: if Network.enable was skipped during addSession (stealthMode and no
     // interception then), enable it now — Fetch.requestPaused correlates by networkId
     // which only appears when Network is enabled.
-    const stealthMode = !!(this._page?.browserContext as any)?._browser?.options?.stealthMode;
+    const stealthMode = !!this._page?.browserContext?._browser?.options?.stealthMode;
     const networkPromise = (enabled && stealthMode && !initial) ? info.session.send('Network.enable').catch(() => {}) : Promise.resolve();
     const cachePromise = info.session.send('Network.setCacheDisabled', { cacheDisabled: enabled });
     let fetchPromise = Promise.resolve<any>(undefined);

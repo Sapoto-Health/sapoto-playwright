@@ -39,6 +39,22 @@
 
 import { contextTest as it, expect } from '../config/browserTest';
 
+// Browser-side globals injected by the init scripts below. These are evaluated
+// inside the page (not Node), so the typing is purely to keep TypeScript
+// happy — the production bridge in browserContextFactory.ts has its own runtime
+// shape; this is the minimal subset the test fixtures push through.
+type BridgePayload = {
+  url: string;
+  title: string;
+  timestamp: number;
+  scope: 'top' | 'iframe';
+  frameSelector: string | null;
+};
+type BridgeWindow = Window & {
+  electronAPI?: { requestPrintCapture(payload: BridgePayload): void };
+  __capturedPayloads?: BridgePayload[];
+};
+
 const BRIDGE_INIT_SCRIPT = () => {
   const DEFERRED_TIMEOUT_MS = 100; // shortened from 2000 for test speed
   const sanitizeUrl = function(href: string): string {
@@ -56,10 +72,10 @@ const BRIDGE_INIT_SCRIPT = () => {
       if (window.print !== deferred) {
         window.print();
       } else {
-        let w: Window | null = window;
+        let w: BridgeWindow | null = window as BridgeWindow;
         for (let hops = 0; hops < 8 && w; hops += 1) {
           try {
-            const api = (w as any).electronAPI;
+            const api = w.electronAPI;
             if (api && typeof api.requestPrintCapture === 'function') {
               // Pre-filter mirrors browserContextFactory.ts — IDs that need
               // CSS.escape() (digit-leading, special chars) fall back to null
@@ -96,7 +112,7 @@ const BRIDGE_INIT_SCRIPT = () => {
           try {
             if (w === w.parent)
               break;
-            w = w.parent;
+            w = w.parent as BridgeWindow;
           } catch (_) {
             break;
           }
@@ -110,11 +126,12 @@ const BRIDGE_INIT_SCRIPT = () => {
 const STUB_ELECTRON_API = () => {
   // Stub electronAPI on the top frame. The init script above runs in every
   // frame; the bridge walk should find this stub on the top frame only.
-  (window as any).__capturedPayloads = [];
-  if (window === window.top) {
-    (window as any).electronAPI = {
-      requestPrintCapture(payload: any) {
-        (window as any).__capturedPayloads.push(payload);
+  const w = window as BridgeWindow;
+  w.__capturedPayloads = [];
+  if (w === w.top) {
+    w.electronAPI = {
+      requestPrintCapture(payload: BridgePayload) {
+        w.__capturedPayloads!.push(payload);
       },
     };
   }
@@ -136,9 +153,9 @@ it('bridge walk: 2-level srcdoc iframe sends scope=iframe with frameSelector', a
   `);
 
   // Wait for the deferred timer (100ms in test) + safety margin.
-  await page.waitForFunction(() => (window as any).__capturedPayloads.length > 0, undefined, { timeout: 5000 });
+  await page.waitForFunction(() => (window as BridgeWindow).__capturedPayloads!.length > 0, undefined, { timeout: 5000 });
 
-  const payloads = await page.evaluate(() => (window as any).__capturedPayloads);
+  const payloads = await page.evaluate(() => (window as BridgeWindow).__capturedPayloads!);
   expect(payloads).toHaveLength(1);
 
   const payload = payloads[0];
@@ -179,9 +196,9 @@ it('bridge walk: nested-wrapper srcdoc iframe still reaches top frame', async ({
     </html>
   `);
 
-  await page.waitForFunction(() => (window as any).__capturedPayloads.length > 0, undefined, { timeout: 5000 });
+  await page.waitForFunction(() => (window as BridgeWindow).__capturedPayloads!.length > 0, undefined, { timeout: 5000 });
 
-  const payloads = await page.evaluate(() => (window as any).__capturedPayloads);
+  const payloads = await page.evaluate(() => (window as BridgeWindow).__capturedPayloads!);
   expect(payloads).toHaveLength(1);
 
   const payload = payloads[0];
@@ -205,9 +222,9 @@ it('bridge walk: iframe without id falls back to null frameSelector', async ({ c
     </html>
   `);
 
-  await page.waitForFunction(() => (window as any).__capturedPayloads.length > 0, undefined, { timeout: 5000 });
+  await page.waitForFunction(() => (window as BridgeWindow).__capturedPayloads!.length > 0, undefined, { timeout: 5000 });
 
-  const [payload] = await page.evaluate(() => (window as any).__capturedPayloads);
+  const [payload] = await page.evaluate(() => (window as BridgeWindow).__capturedPayloads!);
   expect(payload.scope).toBe('iframe');
   expect(payload.frameSelector).toBeNull();
 });
@@ -227,9 +244,9 @@ it('bridge walk: iframe with data-print-id uses that selector', async ({ context
     </html>
   `);
 
-  await page.waitForFunction(() => (window as any).__capturedPayloads.length > 0, undefined, { timeout: 5000 });
+  await page.waitForFunction(() => (window as BridgeWindow).__capturedPayloads!.length > 0, undefined, { timeout: 5000 });
 
-  const [payload] = await page.evaluate(() => (window as any).__capturedPayloads);
+  const [payload] = await page.evaluate(() => (window as BridgeWindow).__capturedPayloads!);
   expect(payload.scope).toBe('iframe');
   expect(payload.frameSelector).toBe('iframe[data-print-id="bill-2026"]');
 });
@@ -252,9 +269,9 @@ it('bridge walk: unsafe id falls through to valid data-print-id', async ({ conte
     </html>
   `);
 
-  await page.waitForFunction(() => (window as any).__capturedPayloads.length > 0, undefined, { timeout: 5000 });
+  await page.waitForFunction(() => (window as BridgeWindow).__capturedPayloads!.length > 0, undefined, { timeout: 5000 });
 
-  const [payload] = await page.evaluate(() => (window as any).__capturedPayloads);
+  const [payload] = await page.evaluate(() => (window as BridgeWindow).__capturedPayloads!);
   expect(payload.scope).toBe('iframe');
   expect(payload.frameSelector).toBe('iframe[data-print-id="bill-2026"]');
 });
@@ -274,9 +291,9 @@ it('pre-filter: simple alphanumeric id (bill) succeeds with iframe#bill selector
     </html>
   `);
 
-  await page.waitForFunction(() => (window as any).__capturedPayloads.length > 0, undefined, { timeout: 5000 });
+  await page.waitForFunction(() => (window as BridgeWindow).__capturedPayloads!.length > 0, undefined, { timeout: 5000 });
 
-  const [payload] = await page.evaluate(() => (window as any).__capturedPayloads);
+  const [payload] = await page.evaluate(() => (window as BridgeWindow).__capturedPayloads!);
   expect(payload.scope).toBe('iframe');
   expect(payload.frameSelector).toBe('iframe#bill');
 });
@@ -298,9 +315,9 @@ it('pre-filter: digit-leading id (1bill) skips selector — falls back to null s
     </html>
   `);
 
-  await page.waitForFunction(() => (window as any).__capturedPayloads.length > 0, undefined, { timeout: 5000 });
+  await page.waitForFunction(() => (window as BridgeWindow).__capturedPayloads!.length > 0, undefined, { timeout: 5000 });
 
-  const [payload] = await page.evaluate(() => (window as any).__capturedPayloads);
+  const [payload] = await page.evaluate(() => (window as BridgeWindow).__capturedPayloads!);
   expect(payload.scope).toBe('iframe');
   expect(payload.frameSelector).toBeNull();
 });
@@ -324,9 +341,9 @@ it('bridge walk: url is sanitized — query string + hash stripped', async ({ co
     </html>
   `);
 
-  await page.waitForFunction(() => (window as any).__capturedPayloads.length > 0, undefined, { timeout: 5000 });
+  await page.waitForFunction(() => (window as BridgeWindow).__capturedPayloads!.length > 0, undefined, { timeout: 5000 });
 
-  const [payload] = await page.evaluate(() => (window as any).__capturedPayloads);
+  const [payload] = await page.evaluate(() => (window as BridgeWindow).__capturedPayloads!);
   expect(payload.url).not.toContain('?');
   expect(payload.url).not.toContain('#');
 });
