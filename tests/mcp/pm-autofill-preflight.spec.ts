@@ -79,6 +79,7 @@ test('rung 3 succeeds — fills after username focus-click', async ({ page }) =>
   `));
   const result = await runPmAutofillPreflight({
     page,
+    usernameSelector: 'input[name="username"]',
     budgetMs: { baseline: 800, refresh: 800, focusClick: 1500, noFormWait: 1000 },
   });
   expect(result.status).toBe('filled');
@@ -144,6 +145,7 @@ test('bypasses React-style value-descriptor override', async ({ page }) => {
   `));
   const result = await runPmAutofillPreflight({
     page,
+    usernameSelector: 'input[name="username"]',
     budgetMs: { baseline: 1500, refresh: 500, focusClick: 500, noFormWait: 500 },
   });
   expect(result.status).toBe('filled');

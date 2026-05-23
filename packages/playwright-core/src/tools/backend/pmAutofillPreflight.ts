@@ -72,28 +72,6 @@ const DEFAULT_POLL_MS = 250;
 const DEFAULT_PASSWORD_SELECTOR =
   'input[type="password"]:not([aria-hidden="true"])';
 
-// Username: any text-like input preceding the password field in the same form.
-const DEFAULT_USERNAME_EVAL = `(() => {
-  const pw = document.querySelector('input[type="password"]:not([aria-hidden="true"])');
-  if (!pw) return null;
-  const form = pw.closest('form');
-  const root = form ?? document;
-  const candidates = root.querySelectorAll(
-    'input[type="text"], input[type="email"], input[type="tel"], input:not([type])',
-  );
-  let chosen = null;
-  for (const el of candidates) {
-    if (pw.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING) chosen = el;
-  }
-  return chosen ? buildSelectorFor(chosen) : null;
-
-  function buildSelectorFor(el) {
-    if (el.id) return '#' + CSS.escape(el.id);
-    if (el.name) return 'input[name="' + CSS.escape(el.name) + '"]';
-    return 'input:not([type=password])';
-  }
-})()`;
-
 /**
  * Read both field values atomically via the native HTMLInputElement.value
  * descriptor. React's controlled-component override on the instance is
@@ -133,14 +111,6 @@ async function waitForPasswordField(
     const loc = page.locator(selector).first();
     await loc.waitFor({ state: 'attached', timeout: budgetMs });
     return loc;
-  } catch {
-    return null;
-  }
-}
-
-async function resolveUsernameSelector(page: Page): Promise<string | null> {
-  try {
-    return await page.evaluate(DEFAULT_USERNAME_EVAL);
   } catch {
     return null;
   }
@@ -198,7 +168,12 @@ export async function runPmAutofillPreflight(
     return { status: 'no-form', elapsedMs };
   }
 
-  const usernameSelector = opts.usernameSelector ?? (await resolveUsernameSelector(opts.page));
+  // usernameSelector is only consumed by rung 3 (focus-click). The schema
+  // documents that omitting it skips rung 3 — so we honor that by leaving this
+  // value as-is (no auto-derivation). Rung 1/2 polling still uses it for the
+  // `hasUsername` snapshot, which is fine: a missing selector just reports
+  // hasUsername=false.
+  const usernameSelector = opts.usernameSelector ?? null;
 
   const tried: Technique[] = [];
 

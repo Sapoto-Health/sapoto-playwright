@@ -89,8 +89,16 @@ export function decorateMCPCommand(command: Command) {
         // normalize the --no-sandbox option: sandbox = true => nothing was passed, sandbox = false => --no-sandbox was passed.
         options.sandbox = options.sandbox === true ? undefined : false;
 
-        // normalize --humanize-input=on|off: default off (undefined => false). 'on' => true, 'off' => false.
-        options.humanizeInput = (options.humanizeInput as unknown as string) === 'on' ? true : false;
+        // normalize --humanize-input=on|off: 'on' => true, 'off' => false, undefined => undefined.
+        // Leaving the undefined case undefined lets env/config-file values flow through; the
+        // previous shape collapsed it to `false`, silently stomping an env/config `true`.
+        options.humanizeInput = options.humanizeInput === undefined ? undefined : ((options.humanizeInput as unknown as string) === 'on');
+
+        // normalize --no-stealth: stealth = true => nothing was passed (commander's default for a
+        // --no- flag), stealth = false => --no-stealth was explicitly passed. Map the default-true
+        // case to undefined so env (PLAYWRIGHT_MCP_STEALTH) / config-file `stealth: false` aren't
+        // stomped by configFromCLIOptions re-asserting `true` on every invocation.
+        options.stealth = options.stealth === true ? undefined : false;
 
         setupExitWatchdog();
 

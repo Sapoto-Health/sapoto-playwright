@@ -300,16 +300,19 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
   if (cliOptions.sandbox !== undefined)
     launchOptions.chromiumSandbox = cliOptions.sandbox;
 
-  // --humanize-input on => humanizeInput: true; default off.
-  if (cliOptions.humanizeInput === true)
-    launchOptions.humanizeInput = true;
+  // --humanize-input on => true, off => false. Emit whenever defined so an
+  // explicit `off` can override an env/config-file `true` during merge; the
+  // prior truthy-only branch silently dropped the off case.
+  if (cliOptions.humanizeInput !== undefined)
+    launchOptions.humanizeInput = cliOptions.humanizeInput;
 
-  // CDP stealth: default on. `--no-stealth` sets cliOptions.stealth === false.
-  // Pass through into launchOptions; the server reads `options.stealthMode` on
-  // both the launch path (server/browserType.ts) and the CDP-attach path
-  // (chromium/chromium.ts).
-  if (cliOptions.stealth !== false)
-    launchOptions.stealthMode = true;
+  // CDP stealth: default on. Only emit `stealthMode` when the user explicitly set
+  // a value (program.ts normalizes the default-true commander value to undefined,
+  // so `false` here means `--no-stealth` was passed and `true` would mean a config
+  // upstream of CLI). Without this, the CLI path would re-assert `true` every time
+  // and stomp PLAYWRIGHT_MCP_STEALTH=0 / config-file `stealth: false`.
+  if (cliOptions.stealth !== undefined)
+    launchOptions.stealthMode = cliOptions.stealth;
 
   if (cliOptions.device && cliOptions.cdpEndpoint)
     throw new Error('Device emulation is not supported with cdpEndpoint.');
@@ -392,9 +395,10 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
     filterInternalUrls: cliOptions.filterInternalUrls,
     suppressFocus: cliOptions.suppressFocus,
     disableDownloads: cliOptions.disableDownloads,
-    // CDP stealth: default on. Only flow through `false` explicitly so the default
-    // applies when the flag isn't passed (commander emits `stealth: true` even when
-    // `--no-stealth` is absent because of `.option('--no-stealth')`).
+    // CDP stealth: default on. cliOptions.stealth is normalized in program.ts to
+    // undefined (not passed) or false (--no-stealth explicit), so pass-through works:
+    // undefined gets dropped by pickDefined() during merge, letting env/config-file
+    // values survive; false explicitly disables.
     stealth: cliOptions.stealth,
   };
 
