@@ -988,6 +988,8 @@ scheme.BrowserTypeLaunchParams = tObject({
   chromiumSandbox: tOptional(tBoolean),
   firefoxUserPrefs: tOptional(tAny),
   cdpPort: tOptional(tInt),
+  stealthMode: tOptional(tBoolean),
+  humanizeInput: tOptional(tBoolean),
   slowMo: tOptional(tFloat),
 });
 scheme.BrowserTypeLaunchResult = tObject({
@@ -1017,6 +1019,8 @@ scheme.BrowserTypeLaunchPersistentContextParams = tObject({
   chromiumSandbox: tOptional(tBoolean),
   firefoxUserPrefs: tOptional(tAny),
   cdpPort: tOptional(tInt),
+  stealthMode: tOptional(tBoolean),
+  humanizeInput: tOptional(tBoolean),
   noDefaultViewport: tOptional(tBoolean),
   viewport: tOptional(tObject({
     width: tInt,
@@ -1094,6 +1098,8 @@ scheme.BrowserTypeConnectOverCDPParams = tObject({
   isLocal: tOptional(tBoolean),
   noDefaults: tOptional(tBoolean),
   artifactsDir: tOptional(tString),
+  stealthMode: tOptional(tBoolean),
+  humanizeInput: tOptional(tBoolean),
 });
 scheme.BrowserTypeConnectOverCDPResult = tObject({
   browser: tChannel(['Browser']),

@@ -94,6 +94,8 @@ LaunchOptions:
     chromiumSandbox: boolean?
     firefoxUserPrefs: json?
     cdpPort: int?
+    stealthMode: boolean?
+    humanizeInput: boolean?
 
 ContextOptions:
   type: mixin

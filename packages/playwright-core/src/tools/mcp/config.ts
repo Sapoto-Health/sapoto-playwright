@@ -53,6 +53,7 @@ export type CLIOptions = {
   grantPermissions?: string[];
   headless?: boolean;
   host?: string;
+  humanizeInput?: boolean;
   ignoreHttpsErrors?: boolean;
   initScript?: string[];
   initPage?: string[];
@@ -286,6 +287,10 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
   if (cliOptions.sandbox !== undefined)
     launchOptions.chromiumSandbox = cliOptions.sandbox;
 
+  // --humanize-input on => humanizeInput: true; default off.
+  if (cliOptions.humanizeInput === true)
+    (launchOptions as any).humanizeInput = true;
+
   if (cliOptions.device && cliOptions.cdpEndpoint)
     throw new Error('Device emulation is not supported with cdpEndpoint.');
 
@@ -389,6 +394,7 @@ export function configFromEnv(env?: NodeJS.ProcessEnv): Config & { configFile?: 
   options.grantPermissions = commaSeparatedList(e.PLAYWRIGHT_MCP_GRANT_PERMISSIONS);
   options.headless = envToBoolean(e.PLAYWRIGHT_MCP_HEADLESS);
   options.host = envToString(e.PLAYWRIGHT_MCP_HOST);
+  options.humanizeInput = envToBoolean(e.PLAYWRIGHT_MCP_HUMANIZE_INPUT);
   options.ignoreHttpsErrors = envToBoolean(e.PLAYWRIGHT_MCP_IGNORE_HTTPS_ERRORS);
   const initPage = envToString(e.PLAYWRIGHT_MCP_INIT_PAGE);
   if (initPage)

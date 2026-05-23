@@ -65,6 +65,8 @@ export type BrowserOptions = {
   originalLaunchOptions: types.LaunchOptions;
   userDataDir?: string;
   noDefaults?: boolean;
+  stealthMode?: boolean;
+  humanizeInput?: boolean;
 };
 
 export abstract class Browser extends SdkObject {

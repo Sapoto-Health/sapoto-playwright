@@ -161,6 +161,8 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
       isLocal: params.isLocal,
       noDefaults: params.noDefaults,
       artifactsDir: params.artifactsDir,
+      stealthMode: (params as any).stealthMode,
+      humanizeInput: (params as any).humanizeInput,
     });
     return await this._browserFromConnectResult(result);
   }

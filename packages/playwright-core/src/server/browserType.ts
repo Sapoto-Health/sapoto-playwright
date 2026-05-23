@@ -131,6 +131,8 @@ export abstract class BrowserType extends SdkObject {
         wsEndpoint,
         originalLaunchOptions: options,
         userDataDir: persistent ? userDataDir : undefined,
+        stealthMode: options.stealthMode,
+        humanizeInput: options.humanizeInput,
       };
       if (persistent)
         validateBrowserContextOptions(persistent, browserOptions);
@@ -286,7 +288,7 @@ export abstract class BrowserType extends SdkObject {
     }
   }
 
-  async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, timeout?: number, headers?: types.HeadersArray, isLocal?: boolean, noDefaults?: boolean, artifactsDir?: string }): Promise<Browser> {
+  async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, timeout?: number, headers?: types.HeadersArray, isLocal?: boolean, noDefaults?: boolean, artifactsDir?: string, stealthMode?: boolean, humanizeInput?: boolean }): Promise<Browser> {
     throw new Error('CDP connections are only supported by Chromium');
   }
 

@@ -81,7 +81,7 @@ export class Chromium extends BrowserType {
     return super.launchPersistentContext(progress, userDataDir, options);
   }
 
-  override async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, headers?: types.HeadersArray, isLocal?: boolean, noDefaults?: boolean, artifactsDir?: string }) {
+  override async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, headers?: types.HeadersArray, isLocal?: boolean, noDefaults?: boolean, artifactsDir?: string, stealthMode?: boolean, humanizeInput?: boolean }) {
     return await this._connectOverCDPInternal(progress, endpointURL, options);
   }
 
@@ -153,6 +153,8 @@ export class Chromium extends BrowserType {
         tracesDir: options.tracesDir || artifactsDir,
         originalLaunchOptions: {},
         noDefaults: options.noDefaults,
+        stealthMode: options.stealthMode,
+        humanizeInput: options.humanizeInput,
       };
       validateBrowserContextOptions(persistent, browserOptions);
       const browser = await progress.race(CRBrowser.connect(this.attribution.playwright, transport, browserOptions));

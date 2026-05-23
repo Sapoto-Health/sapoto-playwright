@@ -52,6 +52,7 @@ export function decorateMCPCommand(command: Command) {
       .option('--grant-permissions <permissions...>', 'List of permissions to grant to the browser context, for example "geolocation", "clipboard-read", "clipboard-write".', commaSeparatedList)
       .option('--headless', 'run browser in headless mode, headed by default')
       .option('--host <host>', 'host to bind server to. Default is localhost. Use 0.0.0.0 to bind to all interfaces.')
+      .option('--humanize-input <mode>', 'enable humanized input dispatch (bezier-curve mouse paths). Can be "on" or "off". Default is "off".', enumParser.bind(null, '--humanize-input', ['on', 'off']))
       .option('--ignore-https-errors', 'ignore https errors')
       .option('--init-page <path...>', 'path to TypeScript file to evaluate on Playwright page object')
       .option('--init-script <path...>', 'path to JavaScript file to add as an initialization script. The script will be evaluated in every page before any of the page\'s scripts. Can be specified multiple times.')
@@ -81,6 +82,9 @@ export function decorateMCPCommand(command: Command) {
 
         // normalize the --no-sandbox option: sandbox = true => nothing was passed, sandbox = false => --no-sandbox was passed.
         options.sandbox = options.sandbox === true ? undefined : false;
+
+        // normalize --humanize-input=on|off: default off (undefined => false). 'on' => true, 'off' => false.
+        options.humanizeInput = (options.humanizeInput as unknown as string) === 'on' ? true : false;
 
         setupExitWatchdog();
 
