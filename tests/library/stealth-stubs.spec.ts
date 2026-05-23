@@ -190,14 +190,25 @@ test('stealth init: Notification.permission flipped from granted to default', ()
   expect(ctx.Notification.permission).toBe('default');
 });
 
-test('stealth init: window.print becomes a deferred handler (not the original)', () => {
+test('stealth init: window.print becomes a deferred handler when suppressFocus=true (C3)', () => {
+  // Per Sapoto #1044: C3 (deferred print + Path D bridge) is gated on
+  // suppressFocus, not on stealth. The stealth-only path leaves print alone.
+  const { buildStealthInitScript } = require('../../packages/playwright-core/src/tools/backend/stealthInitScript');
   const ctx = newPageContext();
   const printBefore = ctx.print;
-  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
+  vm.runInContext(buildStealthInitScript({ stealth: true, suppressFocus: true }), ctx);
   expect(ctx.print).not.toBe(printBefore);
   expect(typeof ctx.print).toBe('function');
   // Calling it must NOT throw (it should schedule a deferred check and return).
   expect(() => ctx.print()).not.toThrow();
+});
+
+test('stealth init: window.print untouched when suppressFocus=false (C3 gated off)', () => {
+  // The default-options export is suppressFocus:false. C3 must NOT install.
+  const ctx = newPageContext();
+  const printBefore = ctx.print;
+  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
+  expect(ctx.print).toBe(printBefore); // unchanged
 });
 
 test('stealth init: __chromeStealth idempotency guard — second run is a no-op', () => {
@@ -221,10 +232,16 @@ test('stealth init: third-party-frame guard — script does not throw with no DO
   // execute before `navigator` is wired up. The script must install whatever
   // pieces it CAN (chrome stubs, deferred print) without aborting on a
   // missing global. This is the regression test for Sapoto #1036.
+  //
+  // Post-Sapoto #1044: C3 deferred-print is gated on suppressFocus, so this
+  // test builds with both stealth=true AND suppressFocus=true to cover the
+  // full third-party-frame surface that pre-#1044 was always installed.
+  const { buildStealthInitScript } = require('../../packages/playwright-core/src/tools/backend/stealthInitScript');
+  const script = buildStealthInitScript({ stealth: true, suppressFocus: true });
   const minimal: any = {};
   vm.createContext(minimal);
   vm.runInContext(`globalThis.window = globalThis; globalThis.setTimeout = () => 0;`, minimal);
-  expect(() => vm.runInContext(CDP_STEALTH_INIT_SCRIPT, minimal)).not.toThrow();
+  expect(() => vm.runInContext(script, minimal)).not.toThrow();
   // Even without navigator/Notification, chrome stubs + deferred print still install.
   expect(vm.runInContext('typeof chrome', minimal)).toBe('object');
   expect(vm.runInContext('typeof chrome.app', minimal)).toBe('object');

@@ -76,10 +76,25 @@
 
 export type StealthInitScriptOptions = {
   /**
-   * When true, install the suppressFocus-mode print override (C4) and the
-   * window.open focus-steal shim (C5). Defaults to false. Sapoto plumbs this
-   * via `config.suppressFocus` (CLI flag `--suppress-focus` or env var
-   * PLAYWRIGHT_MCP_SUPPRESS_FOCUS).
+   * When true, install the fingerprint-defeating stealth stubs (C1: webdriver,
+   * C2: chrome.{app,csi,loadTimes} + navigator.languages + Notification, and
+   * Function.prototype.toString masking). Sapoto's chrome mode passes
+   * `--no-stealth` (stealth=false) because chrome's real identity must not be
+   * shadowed by the stubs — but FocusShim/Path D still need to install in
+   * that mode. So gating C1/C2 must be independent of gating C3/C4/C5.
+   *
+   * The C3 deferred-print hook (Path D srcdoc-iframe bridge) is gated on
+   * `suppressFocus` as well — only Sapoto's externalBrowser mode wants it.
+   * Plain Playwright callers with stealth=true, suppressFocus=false get just
+   * C1/C2.
+   */
+  stealth: boolean;
+  /**
+   * When true, install the deferred window.print() + Path D srcdoc-iframe
+   * bridge (C3), the suppressFocus-mode print override (C4), and the
+   * window.open focus-steal shim (C5). Sapoto plumbs this via
+   * `config.suppressFocus` (CLI flag `--suppress-focus` or env var
+   * PLAYWRIGHT_MCP_SUPPRESS_FOCUS). Defaults to false.
    */
   suppressFocus: boolean;
 };
@@ -94,6 +109,7 @@ export type StealthInitScriptOptions = {
  * regress iframe print capture (Path D / issue #1006).
  */
 export function buildStealthInitScript(options: StealthInitScriptOptions): string {
+  const stealth = !!options.stealth;
   const suppressFocus = !!options.suppressFocus;
   return `(() => {
   if ((window).__chromeStealth) return;
@@ -122,6 +138,7 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
     }
   };
 
+  ${stealth ? `
   // ============================================================
   // C1 — navigator.webdriver = false (not undefined)
   // ============================================================
@@ -222,7 +239,9 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
     // Per Sapoto #1036, any C2 failure must NOT abort the rest of the init.
     // Swallow and continue so C3+ still install.
   }
+  ` : ''}
 
+  ${suppressFocus ? `
   // ============================================================
   // C3 — Deferred window.print() + Path D srcdoc-iframe bridge (#1006)
   // ============================================================
@@ -308,6 +327,7 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
     };
     window.print = deferred;
   } catch (_) {}
+  ` : ''}
 
   ${suppressFocus ? `
   // ============================================================
@@ -628,9 +648,10 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
 }
 
 /**
- * Default-options stealth init script — `suppressFocus: false`. Preserved as a
- * named export so existing unit tests in `tests/library/stealth-stubs.spec.ts`
- * (and any consumers that import the constant directly) keep working without
- * passing options.
+ * Default-options stealth init script — `stealth: true, suppressFocus: false`.
+ * Preserved as a named export so existing unit tests in
+ * `tests/library/stealth-stubs.spec.ts` (and any consumers that import the
+ * constant directly) keep working without passing options. This is the
+ * "stealth stubs only, no FocusShim" form.
  */
-export const CDP_STEALTH_INIT_SCRIPT = buildStealthInitScript({ suppressFocus: false });
+export const CDP_STEALTH_INIT_SCRIPT = buildStealthInitScript({ stealth: true, suppressFocus: false });
