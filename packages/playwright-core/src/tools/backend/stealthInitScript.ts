@@ -22,16 +22,24 @@
  * grep them; the function is one consolidated block so a single addInitScript
  * call covers all sub-stubs.
  *
- *   C1: navigator.webdriver → false
+ *   C1: navigator.webdriver → false (Navigator.prototype, masked native)
  *        Real Chrome returns `false` when automation is not active. Returning
  *        `undefined` is detectable: `typeof navigator.webdriver === "undefined"`
- *        vs the expected `"boolean"`.
+ *        vs the expected `"boolean"`. PRD #1045 / A5: getter lives on
+ *        Navigator.prototype (mirroring real Chrome), is _markNative'd so
+ *        `.toString()` reads as `function webdriver() { [native code] }`,
+ *        and sits BELOW the _markNative definition inside the C2 try block.
  *
- *   C2: chrome.{app,csi,loadTimes} + navigator.languages + Notification.permission
- *        Akamai bmak, OneTrust, and several portal scripts read these. Missing or
- *        anomalous values are a strong automation tell. Function.prototype.toString
- *        is patched (via a WeakMap that survives the `.toString.call(weirdThis)`
- *        pattern bmak uses) so each stub returns a native-looking signature.
+ *   C2: Function.prototype.toString masking + optional chrome.{app,csi,loadTimes}
+ *        + Notification.permission. Akamai bmak, OneTrust, and several portal
+ *        scripts read these. Missing or anomalous values are a strong automation
+ *        tell. Function.prototype.toString is patched (via a WeakMap that survives
+ *        the `.toString.call(weirdThis)` pattern bmak uses) so each stub returns
+ *        a native-looking signature. PRD #1045 / A5: the chrome.* + Notification
+ *        sub-stubs are gated on `chromeRuntimeStubs`; the toString patch and the
+ *        `__stealthMarkNative` cross-section helper always install. The
+ *        navigator.languages length-1 clamp was REMOVED — real Chrome's value
+ *        passes through unchanged.
  *
  *   C3: Deferred window.print() + Path D srcdoc-iframe bridge (Sapoto #1006)
  *        Synchronous early-script window.print() calls would otherwise raise a
@@ -44,8 +52,10 @@
  *        the call is silently suppressed (better than a blocking dialog).
  *
  *   C4: suppressFocus-mode print + Path D mirror (Sapoto #1006)
- *        Gated on `suppressFocus`. Replaces the deferred hook with a fast-path
- *        intercept that logs and re-runs the bridge walk for iframe scopes.
+ *        Gated on `suppressFocus && printCapture`. Replaces the deferred hook
+ *        with a fast-path intercept that logs and re-runs the bridge walk for
+ *        iframe scopes. PRD #1045 / A5: callers that own print capture
+ *        out-of-band can disable C3 + C4 together via `printCapture: false`.
  *
  *   C5: window.open focus-steal shim (Sapoto #1036, refactor #1043)
  *        Gated on `suppressFocus`. Page-level window.open(url, '_blank') routes
@@ -77,11 +87,11 @@
 export type StealthInitScriptOptions = {
   /**
    * When true, install the fingerprint-defeating stealth stubs (C1: webdriver,
-   * C2: chrome.{app,csi,loadTimes} + navigator.languages + Notification, and
-   * Function.prototype.toString masking). Sapoto's chrome mode passes
-   * `--no-stealth` (stealth=false) because chrome's real identity must not be
-   * shadowed by the stubs — but FocusShim/Path D still need to install in
-   * that mode. So gating C1/C2 must be independent of gating C3/C4/C5.
+   * C2: Function.prototype.toString masking + optional chrome.{app,csi,loadTimes}
+   * + Notification sub-stubs). Sapoto's chrome mode passes `--no-stealth`
+   * (stealth=false) because chrome's real identity must not be shadowed by
+   * the stubs — but FocusShim/Path D still need to install in that mode. So
+   * gating C1/C2 must be independent of gating C3/C4/C5.
    *
    * The C3 deferred-print hook (Path D srcdoc-iframe bridge) is gated on
    * `suppressFocus` as well — only Sapoto's externalBrowser mode wants it.
@@ -97,6 +107,21 @@ export type StealthInitScriptOptions = {
    * PLAYWRIGHT_MCP_SUPPRESS_FOCUS). Defaults to false.
    */
   suppressFocus: boolean;
+  /**
+   * PRD #1045 / Tracer A5: when false, skip BOTH print-override blocks (C3
+   * deferred and C4 suppressFocus-mode fast-path). Useful for callers that
+   * own print-capture out-of-band (e.g. a CDP-level Page.printToPDF flow).
+   * Defaults to true so existing behavior is preserved.
+   */
+  printCapture?: boolean;
+  /**
+   * PRD #1045 / Tracer A5: when false, skip the chrome.{app,csi,loadTimes}
+   * and Notification.permission sub-stubs inside C2. The Function.prototype.
+   * toString masking and the `__stealthMarkNative` cross-section helper are
+   * always installed (C4/C5 depend on the helper). Defaults to true so
+   * existing behavior is preserved.
+   */
+  chromeRuntimeStubs?: boolean;
 };
 
 /**
@@ -104,22 +129,35 @@ export type StealthInitScriptOptions = {
  * value is a self-invoking IIFE suitable for `BrowserContext.addInitScript`.
  *
  * The Sapoto build step at scripts/prepare-mcp-assets.js greps the compiled
- * fork output for the `__SAPOTO_PATHD_BRIDGE_V1__` constant. If absent, the
- * build fails — guarding against stale fork rebases that would silently
+ * fork output for the `__SAPOTO_PATHD_BRIDGE_V1_STAMP__` literal. If absent,
+ * the build fails — guarding against stale fork rebases that would silently
  * regress iframe print capture (Path D / issue #1006).
+ *
+ * PRD #1045 / Tracer A5: the previous-generation stamp installed
+ * `window.__SAPOTO_PATHD_BRIDGE_V1__ = true` which polluted the global
+ * namespace (one more page-detectable tell). The grep target is now a
+ * no-op `void` expression — the literal is preserved verbatim in the
+ * compiled output for the build-time grep, but nothing is written to
+ * `window`. Coordinate any rename with `scripts/prepare-mcp-assets.js`
+ * (parallel tracer B6).
  */
 export function buildStealthInitScript(options: StealthInitScriptOptions): string {
   const stealth = !!options.stealth;
   const suppressFocus = !!options.suppressFocus;
+  // A5: new flags default to true so existing callers (and the legacy
+  // CDP_STEALTH_INIT_SCRIPT export) preserve today's behavior unchanged.
+  const printCapture = options.printCapture !== false;
+  const chromeRuntimeStubs = options.chromeRuntimeStubs !== false;
   return `(() => {
   if ((window).__chromeStealth) return;
   (window).__chromeStealth = true;
 
   // Path D (Sapoto #1006) backward-compat detection stamp. The Sapoto build
-  // step greps the compiled fork output for this exact constant. Do NOT
-  // rename without coordinating with the Sapoto side.
-  if (!(window).__SAPOTO_PATHD_BRIDGE_V1__)
-    (window).__SAPOTO_PATHD_BRIDGE_V1__ = true;
+  // step greps the compiled fork output for this exact literal. Do NOT
+  // rename without coordinating with scripts/prepare-mcp-assets.js (B6).
+  // No window pollution: a bare expression statement keeps the literal in
+  // the compiled bundle without leaking onto a global.
+  void '__SAPOTO_PATHD_BRIDGE_V1_STAMP__';
 
   // Helper: redact query string + hash from URL before logging/shipping.
   // window.location.href can carry session tokens in the query string. Per
@@ -140,15 +178,12 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
 
   ${stealth ? `
   // ============================================================
-  // C1 — navigator.webdriver = false (not undefined)
+  // C2 — Function.prototype.toString masking + __stealthMarkNative handshake
   // ============================================================
-  try {
-    Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true });
-  } catch (_) { /* navigator may be locked down by another shim */ }
-
-  // ============================================================
-  // C2 — Function.prototype.toString masking + chrome stubs
-  // ============================================================
+  // PRD #1045 / A5: the toString patch + _markNative helper are ALWAYS
+  // installed inside the stealth gate (the cross-section handshake C4/C5
+  // depend on lives here). Only the chrome.{app,csi,loadTimes} + Notification
+  // sub-stubs are additionally gated on \`chromeRuntimeStubs\`.
   try {
     const _toString = Function.prototype.toString;
     const _nativeMap = new WeakMap();
@@ -170,9 +205,57 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
     };
     _markNative(Function.prototype.toString, 'toString');
     // Expose _markNative to later sections via a closure-captured global so the
-    // C4/C5 blocks can mask their own overrides without re-defining the helper.
+    // C1/C4/C5 blocks can mask their own overrides without re-defining the helper.
     (window).__stealthMarkNative = _markNative;
 
+    // ============================================================
+    // C1 — navigator.webdriver = false (on Navigator.prototype, masked native)
+    // ============================================================
+    // PRD #1045 / A5: moved BELOW _markNative so the getter's .toString() can
+    // be masked. Real Chrome exposes \`webdriver\` as a getter on
+    // Navigator.prototype (not the instance), so we mirror that placement.
+    // Test sandboxes that ship navigator as a plain object (no Navigator
+    // constructor) fall back to defining on the prototype chain we can reach;
+    // the previous instance-only definition is preserved as a last-resort.
+    try {
+      // Extract the getter from an object-literal accessor so its .name is
+      // \`get webdriver\` (Chrome shape) rather than \`webdriver\` (function-expression
+      // shape). This matches real Chrome and B5 (src/main/utils/chromeStealthStubs.ts)
+      // for \`Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver').get.name\`.
+      // The _markNative label uses the same 'get webdriver' string so the masked
+      // .toString() returns \`function get webdriver() { [native code] }\`.
+      const webdriverGetter = _markNative(
+        Object.getOwnPropertyDescriptor({ get webdriver() { return false; } }, 'webdriver').get,
+        'get webdriver'
+      );
+      const desc = { get: webdriverGetter, configurable: true };
+      let installed = false;
+      try {
+        if (typeof Navigator !== 'undefined' && Navigator && Navigator.prototype) {
+          Object.defineProperty(Navigator.prototype, 'webdriver', desc);
+          installed = true;
+          // Ensure no instance-level shadow remains from the underlying browser.
+          try { delete navigator.webdriver; } catch (_) {}
+        }
+      } catch (_) { /* fall through to navigator.prototype probe */ }
+      if (!installed) {
+        try {
+          const proto = Object.getPrototypeOf(navigator);
+          if (proto && proto !== Object.prototype) {
+            Object.defineProperty(proto, 'webdriver', desc);
+            installed = true;
+            try { delete navigator.webdriver; } catch (_) {}
+          }
+        } catch (_) {}
+      }
+      if (!installed) {
+        // Last resort (test sandbox where navigator's proto is Object.prototype):
+        // define on the instance so navigator.webdriver still reads as false.
+        try { Object.defineProperty(navigator, 'webdriver', desc); } catch (_) {}
+      }
+    } catch (_) { /* navigator may be locked down by another shim */ }
+
+    ${chromeRuntimeStubs ? `
     // chrome.app stub — pages probe chrome.app.isInstalled to detect real Chrome.
     if (typeof chrome === 'undefined') (window).chrome = {};
     if (!(chrome).app) {
@@ -221,12 +304,9 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
       }, 'loadTimes');
     }
 
-    // navigator.languages — Chrome ships with at least two entries.
-    if (navigator.languages && navigator.languages.length === 1) {
-      try {
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'], configurable: true });
-      } catch (_) {}
-    }
+    // PRD #1045 / A5: navigator.languages length-1 clamp REMOVED. Real Chrome
+    // reports the user's configured locale list — rewriting it to ['en-US','en']
+    // was itself a fingerprint when the underlying OS exposed a single locale.
 
     // Notification.permission — when launched with --no-default-browser-check etc.,
     // this can stick at 'granted' which differs from a clean user profile.
@@ -235,16 +315,19 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
         Object.defineProperty(Notification, 'permission', { get: () => 'default', configurable: true });
       } catch (_) {}
     }
+    ` : ''}
   } catch (e) {
     // Per Sapoto #1036, any C2 failure must NOT abort the rest of the init.
     // Swallow and continue so C3+ still install.
   }
   ` : ''}
 
-  ${stealth ? `
+  ${stealth && printCapture ? `
   // ============================================================
   // C3 — Deferred window.print() + Path D srcdoc-iframe bridge (#1006)
   // ============================================================
+  // PRD #1045 / A5: additionally gated on \`printCapture\`. Callers that own
+  // print capture out-of-band (e.g. a CDP Page.printToPDF flow) can opt out.
   try {
     const DEFERRED_TIMEOUT_MS = 2000;
     const deferred = function() {
@@ -260,8 +343,10 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
         // contexts (e.g. about:srcdoc) where preload runs only in the top
         // frame. Walk up to 8 parents looking for electronAPI, then send a
         // scope='iframe' bridge call. Per Path D (Sapoto #1006).
-        // Use console.warn so the message reaches Supabase app_logs —
-        // console.log is filtered out by the remote shipper.
+        // DeferredPrint intentionally uses console.warn (unlike FocusShim's
+        // console.debug) because this is a rare, actionable iframe-fallback
+        // event we want surfaced in Supabase app_logs for ops triage —
+        // console.log/debug are filtered out by the remote shipper.
         try { console.warn('[DeferredPrint] no main-frame override at ' + sanitizeUrl(window.location.href)); } catch (_) {}
         let w = window;
         for (let hops = 0; hops < 8 && w; hops += 1) {
@@ -329,10 +414,14 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
   } catch (_) {}
   ` : ''}
 
-  ${suppressFocus ? `
+  ${suppressFocus && printCapture ? `
   // ============================================================
   // C4 — suppressFocus-mode window.print() + Path D mirror (#1006)
   // ============================================================
+  // PRD #1045 / A5: additionally gated on \`printCapture\`. C4 is the
+  // suppressFocus-mode fast-path counterpart to C3 — both share the same
+  // opt-out so callers that own print capture out-of-band see neither block.
+  //
   // Sapoto's externalBrowser mode sets suppressFocus=true. In that mode this
   // override REPLACES the C3 deferred hook above. Top-frame prints are caught
   // by printCapture.ts via the console marker; iframe prints need the explicit
@@ -403,7 +492,9 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
       }
     }, 'print');
   } catch (_) {}
+  ` : ''}
 
+  ${suppressFocus ? `
   // ============================================================
   // C5 — window.open focus-steal shim (Sapoto #1036, refactor #1043, #1044)
   // ============================================================
@@ -438,14 +529,14 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
 
     // Entry marker — fires BEFORE any other shim code, so the absence of
     // this line in app_logs unambiguously means C5 didn't even start.
-    try { console.warn('[FocusShim] C4 entry at ' + sanitizeUrl(location.href) + ' (top=' + (window === window.top) + ')'); } catch (_) {}
+    try { console.debug('[FocusShim] C4 entry at ' + sanitizeUrl(location.href) + ' (top=' + (window === window.top) + ')'); } catch (_) {}
 
     const DOWNLOAD_URL_RE = /\\.(pdf|xlsx?|csv|docx?|zip|tsv|ofx|qfx|qif|7z|rtf)(\\?|#|$)/i;
     const DOWNLOAD_PATH_RE = /\\/(download|statement|statements|export|invoice|invoices|receipt|receipts|PDFStatement|StatementPDF|getstmt|getStmt|stmt)(?:\\/|\\.|$)/i;
     const SELF_TARGET_RE = /^(_self|_parent|_top)$/i;
 
     // Install marker — fires only if the whole patch installed cleanly.
-    try { console.warn('[FocusShim] installed at ' + sanitizeUrl(location.href) + ' (top=' + (window === window.top) + ')'); } catch (_) {}
+    try { console.debug('[FocusShim] installed at ' + sanitizeUrl(location.href) + ' (top=' + (window === window.top) + ')'); } catch (_) {}
 
     const _urlLooksLikeDownload = function(href) {
       if (!href) return false;
@@ -470,7 +561,7 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
     // URL here; existing src/main/redaction/ handles remote-log sanitization
     // for any sensitive params before shipping.
     const _emitBackgroundOpen = function(href) {
-      try { console.warn('[FocusShim] background-open ' + href); } catch (_) {}
+      try { console.debug('[FocusShim] background-open ' + href); } catch (_) {}
     };
 
     const _printCaptureProxy = function() {
@@ -486,7 +577,7 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
         focus: function() { /* noop */ },
         blur: function() { /* noop */ },
         print: function() {
-          try { console.warn('[FocusShim] synthesized-popup print() suppressed; captured chars=' + _capturedHtml.length); } catch (_) {}
+          try { console.debug('[FocusShim] synthesized-popup print() suppressed; captured chars=' + _capturedHtml.length); } catch (_) {}
           try {
             const api = (window).electronAPI;
             if (api && typeof api.requestPrintCapture === 'function') {
@@ -550,14 +641,15 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
       if (_isSapotoElectronBridge()) {
         if (!_electronModeNoticed) {
           _electronModeNoticed = true;
-          try { console.warn('[FocusShim] electron mode detected — delegating to native window.open'); } catch (_) {}
+          try { console.debug('[FocusShim] electron mode detected — delegating to native window.open'); } catch (_) {}
         }
         return _nativeOpen(url, target, features);
       }
 
       // Diagnostic: log EVERY window.open call so we can see in production
-      // logs what targets/URLs the page is using. Use warn (captured).
-      try { console.warn('[FocusShim] window.open called url=' + (u ? sanitizeUrl(u) : '(empty)') + ' target=' + (t || '(empty)')); } catch (_) {}
+      // logs what targets/URLs the page is using. Uses console.debug to keep
+      // noisy per-call diagnostics out of the captured Supabase warn stream.
+      try { console.debug('[FocusShim] window.open called url=' + (u ? sanitizeUrl(u) : '(empty)') + ' target=' + (t || '(empty)')); } catch (_) {}
 
       // _self/_parent/_top navigate in current context — never steal focus.
       if (SELF_TARGET_RE.test(t))
@@ -570,10 +662,10 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
       // native so the page gets a real Window reference.
       if (!u) {
         if (t && t !== '_blank' && !SELF_TARGET_RE.test(t)) {
-          try { console.warn('[FocusShim] → native (empty URL, named target=' + t + ')'); } catch (_) {}
+          try { console.debug('[FocusShim] → native (empty URL, named target=' + t + ')'); } catch (_) {}
           return _nativeOpen(url, target, features);
         }
-        try { console.warn('[FocusShim] → print-capture proxy (empty URL)'); } catch (_) {}
+        try { console.debug('[FocusShim] → print-capture proxy (empty URL)'); } catch (_) {}
         return _printCaptureProxy();
       }
 
@@ -595,16 +687,16 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
           // Unparseable URL — bridge would reject it anyway. Fall through to
           // native so the page sees the same behavior the unshimmed browser
           // would have produced (focus-steal, but at least correct semantics).
-          try { console.warn('[FocusShim] → native (invalid URL)'); } catch (_) {}
+          try { console.debug('[FocusShim] → native (invalid URL)'); } catch (_) {}
           return _nativeOpen(url, target, features);
         }
-        try { console.warn('[FocusShim] → background-open url=' + sanitizeUrl(absoluteUrl)); } catch (_) {}
+        try { console.debug('[FocusShim] → background-open url=' + sanitizeUrl(absoluteUrl)); } catch (_) {}
         _emitBackgroundOpen(absoluteUrl);
         return null;
       }
 
       // Other URLs: native. Focus steals but this is rare in portal automation.
-      try { console.warn('[FocusShim] → native (URL did not match download heuristic)'); } catch (_) {}
+      try { console.debug('[FocusShim] → native (URL did not match download heuristic)'); } catch (_) {}
       return _nativeOpen(url, target, features);
     }, 'open');
 
@@ -621,7 +713,7 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
     } catch (_) {
       // Fallback: plain assignment. Some hardened browsers may reject
       // configurable:false on built-ins; we accept the override risk.
-      try { console.warn('[FocusShim] defineProperty failed, falling back to assignment'); } catch (_) {}
+      try { console.debug('[FocusShim] defineProperty failed, falling back to assignment'); } catch (_) {}
       try { (window).open = _shimOpen; } catch (_) { /* really stuck */ }
     }
   } catch (e) {
@@ -631,7 +723,7 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
     try {
       const msg = (e && e.message) ? String(e.message) : String(e);
       const stack = (e && e.stack) ? String(e.stack).split('\\n').slice(0, 5).join(' / ') : '(no stack)';
-      try { console.warn('[FocusShim] install crashed: ' + msg + ' | stack=' + stack + ' | at ' + sanitizeUrl(location.href)); } catch (_) {}
+      try { console.debug('[FocusShim] install crashed: ' + msg + ' | stack=' + stack + ' | at ' + sanitizeUrl(location.href)); } catch (_) {}
     } catch (_) { /* logger itself threw — give up silently */ }
   }
   ` : ''}
