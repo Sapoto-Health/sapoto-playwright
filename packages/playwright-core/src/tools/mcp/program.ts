@@ -75,6 +75,7 @@ export function decorateMCPCommand(command: Command) {
       .option('--snapshot-mode <mode>', 'when taking snapshots for responses, specifies the mode to use. Can be "full" or "none". Default is "full".')
       .option('--storage-state <path>', 'path to the storage state file for isolated sessions.')
       .option('--suppress-focus', 'suppress focus-stealing: skip bringToFront during tab selection (paired stealth init script is applied separately)')
+      .option('--no-stealth', 'disable CDP stealth mode (default on). Stealth minimizes CDP-domain footprint and injects an init script that masks navigator.webdriver, chrome.app/csi/loadTimes, UA brand hints, and Notification.permission to evade bot detection (DataDome, Akamai, Cloudflare Turnstile).')
       .option('--test-id-attribute <attribute>', 'specify the attribute to use for test ids, defaults to "data-testid"')
       .option('--timeout-action <timeout>', 'specify action timeout in milliseconds, defaults to 5000ms', numberParser)
       .option('--timeout-download <timeout>', 'specify download completion timeout in milliseconds, defaults to 30000ms', numberParser)

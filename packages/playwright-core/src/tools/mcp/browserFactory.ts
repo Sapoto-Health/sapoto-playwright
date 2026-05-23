@@ -105,10 +105,16 @@ async function createIsolatedBrowser(config: FullConfig, clientInfo: ClientInfo)
 async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Promise<playwrightTypes.Browser> {
   testDebug('create browser (cdp)');
   const artifactsDir = await computeTracesDir(config, clientInfo);
+  // CDP stealth flag flows in via launchOptions for the launch path; for the CDP-attach
+  // path it has to be threaded through connectOverCDP separately.
+  const stealthMode = (config.browser.launchOptions as any)?.stealthMode === true;
   const browser = await playwright.chromium.connectOverCDP(config.browser.cdpEndpoint!, {
     headers: config.browser.cdpHeaders,
     timeout: config.browser.cdpTimeout,
     artifactsDir,
+    // Cast: stealthMode is plumbed through the channel/server but isn't in the public
+    // ConnectOverCDPOptions surface yet.
+    ...(stealthMode ? { stealthMode: true } as any : {}),
   });
   return browser;
 }

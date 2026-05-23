@@ -266,4 +266,19 @@ export type Config = {
    * Playwright's saveAs() would create split ownership.
    */
   disableDownloads?: boolean;
+
+  /**
+   * CDP stealth mode. When true, Playwright minimizes its CDP-domain
+   * footprint (skips Log.enable, gates Network.enable on request interception,
+   * rapid-cycles Runtime.enable around context discovery) and injects an
+   * init script that masks common automation tells (navigator.webdriver,
+   * chrome.app/csi/loadTimes, navigator.languages, Notification.permission,
+   * Chrome UA brand hints, a deferred window.print override).
+   *
+   * Defaults to true. Disable via --no-stealth on the CLI or `stealth: false`
+   * in the config file. The full r1226 fingerprint audit lives as a TODO —
+   * stubs were validated against r1212 (sync/upstream-1.61 merge base) and
+   * may need pruning as Chromium rolls forward.
+   */
+  stealth?: boolean;
 };

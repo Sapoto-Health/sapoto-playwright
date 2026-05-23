@@ -89,7 +89,11 @@ export class CRPage implements PageDelegate {
     this._page = new Page(this, browserContext);
     // Create a unique utility world for this Playwright instance, just in case there
     // are multiple instances of Playwright connected to the same browser page.
-    this.utilityWorldName = `__playwright_utility_world_${this._page.guid}`;
+    // CDP Stealth: Renamed from `__playwright_utility_world_` to avoid framework
+    // fingerprinting. The name appears in Runtime.executionContextCreated events and
+    // Error.stack sourceURL tags; using a generic name hides the automation framework
+    // identity from page scripts that scrape stack traces (Akamai bmak, DataDome).
+    this.utilityWorldName = `__chrome_util_${this._page.guid}`;
     this._networkManager = new CRNetworkManager(this._page, null);
     // Sync any browser context state to the network manager. This does not talk over CDP because
     // we have not connected any sessions to the network manager yet.
@@ -501,9 +505,26 @@ class FrameSession {
           this._eventListeners.push(eventsHelper.addEventListener(this._client, 'Page.lifecycleEvent', event => this._onLifecycleEvent(event)));
         }
       }),
-      this._client.send('Log.enable', {}),
+      // CDP Stealth: Log.enable only surfaces browser-level warnings (network errors,
+      // deprecation notices). Console messages come from Runtime.consoleAPICalled instead.
+      // Skipping it removes a CDP domain that anti-bot fingerprinters watch for, with no
+      // functional impact on MCP tools.
+      ...(this._crPage._browserContext._browser.options.stealthMode ? [] : [this._client.send('Log.enable', {})]),
       lifecycleEventsEnabled = this._client.send('Page.setLifecycleEventsEnabled', { enabled: true }),
-      this._client.send('Runtime.enable', {}),
+      // CDP Stealth: when stealthMode is on, use a rapid Runtime.enable → disable cycle.
+      // The Runtime domain emits `executionContextCreated` synchronously and the events
+      // queue as microtasks; we let those drain, then immediately disable so the
+      // long-lived Runtime domain (the strongest anti-bot fingerprint — the
+      // `console.debug` Proxy trap) is not visible to page scripts.
+      // `runIfWaitingForDebugger` runs later in this Promise.all, so the page is still
+      // paused while we cycle.
+      this._client.send('Runtime.enable', {}).then(() => {
+        if (this._crPage._browserContext._browser.options.stealthMode) {
+          return Promise.resolve().then(() => {
+            return this._client._sendMayFail('Runtime.disable');
+          });
+        }
+      }),
       this._client.send('Page.addScriptToEvaluateOnNewDocument', {
         source: '',
         worldName: this._crPage.utilityWorldName,
@@ -531,6 +552,11 @@ class FrameSession {
         promises.push(this._client.send('Emulation.setScriptExecutionDisabled', { value: true }));
       if (options.userAgent || options.locale)
         promises.push(this._updateUserAgent());
+      // CDP Stealth: even when the user did NOT override the UA, emulate Chrome's
+      // Client Hint brands so navigator.userAgentData.brands matches the binary's
+      // major version. Pages can detect automation when the UA-string Chrome version
+      // mismatches userAgentData.brands (Playwright doesn't normally set brands).
+      promises.push(this._updateUserAgentBrands());
       if (options.locale)
         promises.push(emulateLocale(this._client, options.locale));
       if (options.timezoneId)
@@ -629,6 +655,22 @@ class FrameSession {
     this._page.frameManager.frameCommittedNewDocumentNavigation(framePayload.id, framePayload.url + (framePayload.urlFragment || ''), framePayload.name || '', framePayload.loaderId, initial);
     if (!initial)
       this._firstNonInitialNavigationCommittedFulfill();
+
+    // CDP Stealth: on cross-document navigation, the new document's execution contexts
+    // need fresh discovery, but Runtime.disable stops executionContext* events. Rapid
+    // re-enable / disable now (before the new document's scripts run — Page.frameNavigated
+    // fires at commit time, ahead of DOMContentLoaded) keeps the contexts visible to
+    // Playwright while keeping the Runtime domain dark to page scripts.
+    if (this._crPage._browserContext._browser.options.stealthMode && !initial) {
+      // Stale contexts won't be cleared via executionContextsCleared (Runtime is disabled);
+      // clear manually before the re-enable below.
+      this._onExecutionContextsCleared();
+      this._client.send('Runtime.enable', {}).then(() => {
+        return Promise.resolve().then(() => {
+          return this._client._sendMayFail('Runtime.disable');
+        });
+      }).catch(() => {});
+    }
   }
 
   _onFrameRequestedNavigation(payload: Protocol.Page.frameRequestedNavigationPayload) {
@@ -1001,6 +1043,57 @@ class FrameSession {
     });
   }
 
+  // CDP Stealth: Emulate Chrome's Client Hint brand list (`navigator.userAgentData.brands`,
+  // `fullVersionList`) so the values match the browser binary's actual version. Without
+  // this, the brands are either missing or stamped with a default that doesn't match
+  // the running Chrome — both are strong automation tells. Only runs when the caller did
+  // NOT provide a custom UA (otherwise we'd risk advertising brands that contradict their
+  // override). Skipped for Edge and HeadlessChrome which produce different brand strings.
+  async _updateUserAgentBrands(): Promise<void> {
+    const options = this._crPage._browserContext._options;
+    if (options.userAgent)
+      return;
+    const browser = this._crPage._browserContext._browser;
+    const ua = browser.userAgent();
+    if (!ua.includes('Chrome/') || ua.includes('Edg/') || ua.includes('HeadlessChrome'))
+      return;
+    const brandInfo = buildChromeBrands(browser.version());
+    if (!brandInfo)
+      return;
+
+    const metadata: Protocol.Emulation.UserAgentMetadata = {
+      brands: brandInfo.brands,
+      fullVersionList: brandInfo.fullVersionList,
+      fullVersion: brandInfo.fullVersion,
+      platform: 'Unknown',
+      platformVersion: '',
+      architecture: 'x86',
+      model: '',
+      mobile: false,
+    };
+    // Derive platform metadata from the real UA so it stays internally consistent.
+    if (ua.includes('Macintosh')) {
+      metadata.platform = 'macOS';
+      const match = ua.match(/Mac OS X (\d+[_.\d]*)/);
+      if (match)
+        metadata.platformVersion = match[1].replace(/_/g, '.');
+      if (!ua.includes('Intel'))
+        metadata.architecture = 'arm';
+    } else if (ua.includes('Windows')) {
+      metadata.platform = 'Windows';
+      const match = ua.match(/Windows NT (\d+[.\d]*)/);
+      if (match)
+        metadata.platformVersion = match[1];
+    } else if (ua.toLowerCase().includes('linux')) {
+      metadata.platform = 'Linux';
+    }
+
+    await this._client.send('Emulation.setUserAgentOverride', {
+      userAgent: ua, // must be non-empty for CDP to apply userAgentMetadata
+      userAgentMetadata: metadata,
+    });
+  }
+
   private async _setDefaultFontFamilies(session: CRSession) {
     const fontFamilies = platformToFontFamilies[this._crPage._browserContext._browser._platform()];
     await session.send('Page.setFontFamilies', fontFamilies);
@@ -1208,4 +1301,34 @@ function calculateUserAgentMetadata(options: types.BrowserContextOptions) {
   if (ua.includes('ARM'))
     metadata.architecture = 'arm';
   return metadata;
+}
+
+// CDP Stealth: Build Chrome's UA Client Hint brand list from the running browser's
+// version string. Real Chrome emits three brands: "Chromium", "Google Chrome", and a
+// rotating "Not/A)Brand" (a.k.a. the "GREASE" brand). Tests of this function should
+// cover the version derivation and the three-entry shape — not the exact GREASE string
+// (which Chromium has changed multiple times: ";Not A Brand", "Not/A)Brand", "Not?A_Brand").
+//
+// Exported so the unit tests can validate without spinning up Chromium.
+export function buildChromeBrands(fullVersion: string): {
+  brands: Protocol.Emulation.UserAgentBrandVersion[];
+  fullVersionList: Protocol.Emulation.UserAgentBrandVersion[];
+  fullVersion: string;
+} | undefined {
+  const majorVersion = fullVersion.split('.')[0];
+  if (!majorVersion)
+    return undefined;
+  return {
+    brands: [
+      { brand: 'Chromium', version: majorVersion },
+      { brand: 'Google Chrome', version: majorVersion },
+      { brand: 'Not/A)Brand', version: '99' },
+    ],
+    fullVersionList: [
+      { brand: 'Chromium', version: fullVersion },
+      { brand: 'Google Chrome', version: fullVersion },
+      { brand: 'Not/A)Brand', version: '99.0.0.0' },
+    ],
+    fullVersion,
+  };
 }

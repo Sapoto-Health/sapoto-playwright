@@ -81,6 +81,7 @@ export type CLIOptions = {
   filterInternalUrls?: boolean;
   suppressFocus?: boolean;
   disableDownloads?: boolean;
+  stealth?: boolean;
 };
 
 const defaultConfig: MergedConfig = {
@@ -297,6 +298,13 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
   if (cliOptions.humanizeInput === true)
     (launchOptions as any).humanizeInput = true;
 
+  // CDP stealth: default on. `--no-stealth` sets cliOptions.stealth === false.
+  // Pass through into launchOptions; the server reads `options.stealthMode` on
+  // both the launch path (server/browserType.ts) and the CDP-attach path
+  // (chromium/chromium.ts).
+  if (cliOptions.stealth !== false)
+    (launchOptions as any).stealthMode = true;
+
   if (cliOptions.device && cliOptions.cdpEndpoint)
     throw new Error('Device emulation is not supported with cdpEndpoint.');
 
@@ -378,6 +386,10 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
     filterInternalUrls: cliOptions.filterInternalUrls,
     suppressFocus: cliOptions.suppressFocus,
     disableDownloads: cliOptions.disableDownloads,
+    // CDP stealth: default on. Only flow through `false` explicitly so the default
+    // applies when the flag isn't passed (commander emits `stealth: true` even when
+    // `--no-stealth` is absent because of `.option('--no-stealth')`).
+    stealth: cliOptions.stealth,
   };
 
   return { ...config, configFile: cliOptions.config };
@@ -435,6 +447,9 @@ export function configFromEnv(env?: NodeJS.ProcessEnv): Config & { configFile?: 
   options.filterInternalUrls = envToBoolean(e.PLAYWRIGHT_MCP_FILTER_INTERNAL_URLS);
   options.suppressFocus = envToBoolean(e.PLAYWRIGHT_MCP_SUPPRESS_FOCUS);
   options.disableDownloads = envToBoolean(e.PLAYWRIGHT_MCP_DISABLE_DOWNLOADS);
+  // PLAYWRIGHT_MCP_STEALTH=0 / false disables CDP stealth mode (default on).
+  if (e.PLAYWRIGHT_MCP_STEALTH !== undefined)
+    options.stealth = envToBoolean(e.PLAYWRIGHT_MCP_STEALTH);
   return configFromCLIOptions(options);
 }
 

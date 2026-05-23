@@ -26,6 +26,7 @@ import { isPathInside, isSystemDirectory, isWritable } from '@utils/fileUtils';
 import { playwright } from '../../inprocess';
 
 import { Tab } from './tab';
+import { CDP_STEALTH_INIT_SCRIPT } from './stealthInitScript';
 
 import type * as playwrightTypes from '../../..';
 import type { SessionLog } from './sessionLog';
@@ -56,6 +57,15 @@ export type ContextConfig = {
     mode?: 'full' | 'none';
   };
   suppressFocus?: boolean;
+  /**
+   * CDP stealth mode. Defaults to true (set explicitly to false to disable).
+   * Drives both core-side CDP-domain minimization (see crPage.ts / crNetworkManager.ts)
+   * and renderer-side init scripts that mask common automation tells.
+   * Disabled in extension mode (the content-script delivery path patches the page
+   * instead) and skipped when an embedder owns the page via cdpEndpoint without
+   * launchOptions.stealthMode.
+   */
+  stealth?: boolean;
   testIdAttribute?: string;
   timeouts?: {
     action?: number;
@@ -369,6 +379,13 @@ export class Context {
     }
     for (const initScript of this.config.browser?.initScript || [])
       this._disposables.push(await browserContext.addInitScript({ path: path.resolve(this.options.cwd, initScript) }));
+
+    // CDP stealth init script. Default ON; opt out via `stealth: false` in config
+    // or the CLI `--no-stealth` flag. See stealthInitScript.ts for the per-stub
+    // rationale and the third-party-frame guard backstory (Sapoto #1036).
+    if (this.config.stealth !== false) {
+      this._disposables.push(await browserContext.addInitScript(CDP_STEALTH_INIT_SCRIPT));
+    }
 
     for (const page of browserContext.pages()) {
       if (this.config.filterInternalUrls && this._isInternalUrl(page.url()))

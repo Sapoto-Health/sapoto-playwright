@@ -85,12 +85,22 @@ export class CRNetworkManager {
       ]);
     }
     this._sessions.set(session, sessionInfo);
-    await Promise.all([
-      session.send('Network.enable'),
-      this._updateProtocolRequestInterceptionForSession(sessionInfo, true /* initial */),
-      this._setOfflineForSession(sessionInfo, true /* initial */),
-      this._setExtraHTTPHeadersForSession(sessionInfo, true /* initial */),
-    ]);
+    // CDP Stealth: Network.enable is a passive observer (it doesn't change responses,
+    // only emits events). Skip it under stealthMode UNLESS request interception is
+    // active — when Fetch.requestPaused is in play, the relay correlates by `networkId`,
+    // which is only emitted when Network.enable is on. Without that correlation, paused
+    // requests hang.
+    const stealthMode = !!(this._page?.browserContext as any)?._browser?.options?.stealthMode;
+    const needsNetwork = !stealthMode || this._protocolRequestInterceptionEnabled;
+    const promises: Promise<any>[] = [];
+    if (needsNetwork)
+      promises.push(session.send('Network.enable'));
+    promises.push(
+        this._updateProtocolRequestInterceptionForSession(sessionInfo, true /* initial */),
+        this._setOfflineForSession(sessionInfo, true /* initial */),
+        this._setExtraHTTPHeadersForSession(sessionInfo, true /* initial */),
+    );
+    await Promise.all(promises);
   }
 
   removeSession(session: CRSession) {
@@ -157,6 +167,11 @@ export class CRNetworkManager {
     const enabled = this._protocolRequestInterceptionEnabled;
     if (initial && !enabled)
       return;
+    // CDP Stealth: if Network.enable was skipped during addSession (stealthMode and no
+    // interception then), enable it now — Fetch.requestPaused correlates by networkId
+    // which only appears when Network is enabled.
+    const stealthMode = !!(this._page?.browserContext as any)?._browser?.options?.stealthMode;
+    const networkPromise = (enabled && stealthMode && !initial) ? info.session.send('Network.enable').catch(() => {}) : Promise.resolve();
     const cachePromise = info.session.send('Network.setCacheDisabled', { cacheDisabled: enabled });
     let fetchPromise = Promise.resolve<any>(undefined);
     if (!info.workerFrame) {
@@ -165,7 +180,7 @@ export class CRNetworkManager {
       else
         fetchPromise = info.session.send('Fetch.disable');
     }
-    await Promise.all([cachePromise, fetchPromise]);
+    await Promise.all([networkPromise, cachePromise, fetchPromise]);
   }
 
   async setExtraHTTPHeaders(extraHTTPHeaders: types.HeadersArray) {
