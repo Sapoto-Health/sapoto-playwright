@@ -132,7 +132,7 @@ export class RawMouseImpl implements input.RawMouse {
         for (const step of path) {
           await dispatchOne(step.x, step.y);
           if (step.dt > 0)
-            await new Promise(r => setTimeout(r, step.dt));
+            await progress.wait(step.dt);
         }
       } else {
         await dispatchOne(x, y);
@@ -143,7 +143,10 @@ export class RawMouseImpl implements input.RawMouse {
     if (forClick) {
       // Avoid extra protocol calls related to drag and drop, because click relies on
       // move-down-up protocol commands being sent synchronously.
-      await actualMove();
+      // actualMove internally uses progress.race for each dispatch + progress.wait
+      // between bezier steps; the outer race here keeps lint happy and gives the
+      // overall move the same cancellation semantics as the non-click path.
+      await progress.race(actualMove());
       return;
     }
     await this._dragManager.interceptDragCausedByMove(progress, x, y, button, buttons, modifiers, actualMove);

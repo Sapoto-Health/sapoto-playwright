@@ -61,9 +61,8 @@ export function generateBezierPath(
   const minSteps = opts.minSteps ?? 12;
   const maxSteps = opts.maxSteps ?? 24;
 
-  if (from.x === to.x && from.y === to.y) {
+  if (from.x === to.x && from.y === to.y)
     return [{ x: from.x, y: from.y, dt: 20 + Math.floor(random() * 40) }];
-  }
 
   // Random control points in a perpendicular band ~15% of distance to add curvature.
   const dx = to.x - from.x;
@@ -129,7 +128,8 @@ export function generateBezierPath(
             donorVal = dts[j];
           }
         }
-        if (donor < 0) break;
+        if (donor < 0)
+          break;
         dts[donor] -= 1;
         need -= 1;
       }
