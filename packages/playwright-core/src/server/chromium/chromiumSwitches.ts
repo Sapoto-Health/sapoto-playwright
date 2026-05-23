@@ -44,6 +44,17 @@ const disabledFeatures = [
   'RenderDocument',
   // Prevents downloading optimization hints on startup.
   'OptimizationHints',
+  // Sapoto fork: stealth-by-default. Upstream removed the assistantMode-gated
+  // entry in 4b1b9d681 (chore: remove cdp port from launch options), which
+  // left fork-launched Chromium with navigator.webdriver === true and the
+  // AutomationControlled blink feature enabled. Bank portals (Chase, BofA,
+  // Citi, CapOne, Fidelity) fingerprint both. Re-add always-on — the fork's
+  // raison d'etre is undetectable automation, so there is no use case where
+  // we want this exposed. Only affects Playwright-launched contexts; the
+  // connectOverCDP path inherits whatever the externally-launched browser
+  // was spawned with (autodocs' chromeManager already sets this in its own
+  // --disable-features= list at effects.ts).
+  'AutomationControlled',
   // Disables forced sign-in in Edge.
   'msForceBrowserSignIn',
   // Disables updating the preferred version in LaunchServices preferences on mac.
