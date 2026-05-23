@@ -111,13 +111,18 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
   // Fork extensions on public LaunchOptions / ConnectOverCDPOptions surfaces:
   const launchOptionsWithFork = config.browser.launchOptions as (playwrightTypes.LaunchOptions & { stealthMode?: boolean }) | undefined;
   const stealthMode = launchOptionsWithFork?.stealthMode === true;
-  const connectOptions: playwrightTypes.ConnectOverCDPOptions & { stealthMode?: boolean } = {
+  const connectOptions: playwrightTypes.ConnectOverCDPOptions & { stealthMode?: boolean, suppressFocus?: boolean } = {
     headers: config.browser.cdpHeaders,
     timeout: config.browser.cdpTimeout,
     artifactsDir,
   };
   if (stealthMode)
     connectOptions.stealthMode = true;
+  // Sapoto #1036: when --suppress-focus is set, thread it through so the chromium
+  // server emits `Target.createTarget { background: true }` and Chrome does not
+  // steal OS focus on `browser_tabs { action: "new" }`.
+  if (config.suppressFocus)
+    connectOptions.suppressFocus = true;
   const browser = await playwright.chromium.connectOverCDP(config.browser.cdpEndpoint!, connectOptions);
   return browser;
 }

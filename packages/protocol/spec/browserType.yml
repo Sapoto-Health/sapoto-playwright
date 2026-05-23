@@ -54,6 +54,7 @@ BrowserType:
         artifactsDir: string?
         stealthMode: boolean?
         humanizeInput: boolean?
+        suppressFocus: boolean?
       returns:
         browser: Browser
         defaultContext: BrowserContext?

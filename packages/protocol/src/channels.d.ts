@@ -2077,6 +2077,7 @@ export type BrowserTypeConnectOverCDPParams = {
   artifactsDir?: string,
   stealthMode?: boolean,
   humanizeInput?: boolean,
+  suppressFocus?: boolean,
 };
 export type BrowserTypeConnectOverCDPOptions = {
   headers?: NameValue[],
@@ -2086,6 +2087,7 @@ export type BrowserTypeConnectOverCDPOptions = {
   artifactsDir?: string,
   stealthMode?: boolean,
   humanizeInput?: boolean,
+  suppressFocus?: boolean,
 };
 export type BrowserTypeConnectOverCDPResult = {
   browser: BrowserChannel,

@@ -1100,6 +1100,7 @@ scheme.BrowserTypeConnectOverCDPParams = tObject({
   artifactsDir: tOptional(tString),
   stealthMode: tOptional(tBoolean),
   humanizeInput: tOptional(tBoolean),
+  suppressFocus: tOptional(tBoolean),
 });
 scheme.BrowserTypeConnectOverCDPResult = tObject({
   browser: tChannel(['Browser']),

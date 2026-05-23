@@ -67,6 +67,7 @@ export type BrowserOptions = {
   noDefaults?: boolean;
   stealthMode?: boolean;
   humanizeInput?: boolean;
+  suppressFocus?: boolean;
 };
 
 export abstract class Browser extends SdkObject {

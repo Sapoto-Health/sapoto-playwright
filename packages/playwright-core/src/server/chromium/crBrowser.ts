@@ -370,7 +370,14 @@ export class CRBrowserContext extends BrowserContext<CREventsMap> {
   }
 
   override async doCreateNewPage(): Promise<Page> {
-    const { targetId } = await this._browser._session.send('Target.createTarget', { url: 'about:blank', browserContextId: this._browserContextId });
+    const { targetId } = await this._browser._session.send('Target.createTarget', {
+      url: 'about:blank',
+      browserContextId: this._browserContextId,
+      // Fork extension (Sapoto #1036): when suppressFocus is on, create new
+      // targets in the background so Chrome does not steal OS focus on
+      // `browser_tabs { action: "new" }`.
+      background: this._browser.options.suppressFocus || false,
+    });
     return this._browser._crPages.get(targetId)!._page;
   }
 
