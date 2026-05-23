@@ -42,6 +42,32 @@ const pdf = defineTabTool({
   },
 });
 
+// TODO(M4): re-wire to the Path D srcdoc-iframe print capture bridge when that ports in.
+// For now this is functionally equivalent to browser_pdf_save: it serialises the
+// current page via page.pdf() (Chromium print-to-PDF) and surfaces the buffer as a
+// downloadable artefact. The downstream consumer (DiscoveryAgent path-D handler)
+// expects a real window.print() event so the Electron-side capture handler can
+// intercept the srcdoc-iframe print event; that bridge ports separately in M4.
+const triggerPrint = defineTabTool({
+  capability: 'pdf',
+
+  schema: {
+    name: 'browser_trigger_print',
+    title: 'Trigger print on current page',
+    description: 'Captures the current page as a PDF. Use this when a page has no downloadable PDF and you need to save the rendered content.',
+    inputSchema: z.object({}),
+    type: 'action',
+  },
+
+  handle: async (tab, params, response) => {
+    const data = await tab.page.pdf();
+    const result = await response.resolveClientFile({ prefix: 'print', ext: 'pdf', suggestedFilename: undefined }, 'Print capture');
+    await response.addFileResult(result, data);
+    response.addCode(`await page.pdf(${formatObject({ path: result.relativeName })});`);
+  },
+});
+
 export default [
   pdf,
+  triggerPrint,
 ];
