@@ -59,8 +59,12 @@ export type ContextConfig = {
   suppressFocus?: boolean;
   /**
    * CDP stealth mode. Defaults to true (set explicitly to false to disable).
-   * Drives both core-side CDP-domain minimization (see crPage.ts / crNetworkManager.ts)
-   * and renderer-side init scripts that mask common automation tells.
+   * Drives renderer-side init scripts that mask common automation tells.
+   * Core-side CDP-domain minimization is no longer a single bundled behavior —
+   * PRD #1045 decomposed it into the per-feature `cdpStealth` set (`log-skip`,
+   * `runtime-cycle`, `worker-runtime`; see packages/playwright-core/src/server/cdpStealth.ts
+   * and chromium/cdpStealthGates.ts). This boolean controls only the renderer
+   * init-script bundle today.
    * Disabled in extension mode (the content-script delivery path patches the page
    * instead) and skipped when an embedder owns the page via cdpEndpoint without
    * launchOptions.stealthMode.
