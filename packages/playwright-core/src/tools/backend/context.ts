@@ -26,7 +26,7 @@ import { isPathInside, isSystemDirectory, isWritable } from '@utils/fileUtils';
 import { playwright } from '../../inprocess';
 
 import { Tab } from './tab';
-import { CDP_STEALTH_INIT_SCRIPT } from './stealthInitScript';
+import { buildStealthInitScript } from './stealthInitScript';
 
 import type * as playwrightTypes from '../../..';
 import type { SessionLog } from './sessionLog';
@@ -383,8 +383,11 @@ export class Context {
     // CDP stealth init script. Default ON; opt out via `stealth: false` in config
     // or the CLI `--no-stealth` flag. See stealthInitScript.ts for the per-stub
     // rationale and the third-party-frame guard backstory (Sapoto #1036).
+    // suppressFocus gates the C4 print-capture override (Path D mirror) + the
+    // C5 window.open focus-steal shim (Sapoto #1036, refactor #1043).
     if (this.config.stealth !== false) {
-      this._disposables.push(await browserContext.addInitScript(CDP_STEALTH_INIT_SCRIPT));
+      this._disposables.push(await browserContext.addInitScript(
+          buildStealthInitScript({ suppressFocus: !!this.config.suppressFocus })));
     }
 
     for (const page of browserContext.pages()) {
