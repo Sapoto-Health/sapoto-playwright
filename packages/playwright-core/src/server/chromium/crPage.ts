@@ -32,6 +32,7 @@ import { createHandle, CRExecutionContext } from './crExecutionContext';
 import { RawKeyboardImpl, RawMouseImpl, RawTouchscreenImpl } from './crInput';
 import { CRNetworkManager } from './crNetworkManager';
 import { CRPDF } from './crPdf';
+import { generateUtilityWorldName } from './crUtilityWorldName';
 import { exceptionToError, releaseObject, stackTraceToLocation } from './crProtocolHelper';
 import { platformToFontFamilies } from './defaultFontFamilies';
 import { TargetClosedError } from '../errors';
@@ -88,13 +89,8 @@ export class CRPage implements PageDelegate {
     this._coverage = new CRCoverage(client);
     this._browserContext = browserContext;
     this._page = new Page(this, browserContext);
-    // Create a unique utility world for this Playwright instance, just in case there
-    // are multiple instances of Playwright connected to the same browser page.
-    // CDP Stealth: Renamed from `__playwright_utility_world_` to avoid framework
-    // fingerprinting. The name appears in Runtime.executionContextCreated events and
-    // Error.stack sourceURL tags; using a generic name hides the automation framework
-    // identity from page scripts that scrape stack traces (Akamai bmak, DataDome).
-    this.utilityWorldName = `__chrome_util_${this._page.guid}`;
+    // Per-page opaque utility-world name; see crUtilityWorldName.ts for rationale.
+    this.utilityWorldName = generateUtilityWorldName();
     this._networkManager = new CRNetworkManager(this._page, null);
     // Sync any browser context state to the network manager. This does not talk over CDP because
     // we have not connected any sessions to the network manager yet.
