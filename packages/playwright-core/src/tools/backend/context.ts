@@ -36,9 +36,12 @@ const testDebug = debug('pw:mcp:test');
 
 export type ContextConfig = {
   allowUnrestrictedFileAccess?: boolean;
+  allowedTools?: string[];
   capabilities?: ToolCapability[];
   codegen?: 'typescript' | 'none';
   console?: { level?: 'error' | 'warning' | 'info' | 'debug' };
+  disableDownloads?: boolean;
+  filterInternalUrls?: boolean;
   imageResponses?: 'allow' | 'omit';
   network?: {
     allowedOrigins?: string[];
@@ -52,9 +55,11 @@ export type ContextConfig = {
   snapshot?: {
     mode?: 'full' | 'none';
   };
+  suppressFocus?: boolean;
   testIdAttribute?: string;
   timeouts?: {
     action?: number;
+    download?: number;
     navigation?: number;
     expect?: number;
   };
@@ -174,7 +179,8 @@ export class Context {
     const tab = this._tabs[index];
     if (!tab)
       throw new Error(`Tab ${index} not found`);
-    await tab.page.bringToFront();
+    if (!this.config.suppressFocus)
+      await tab.page.bringToFront();
     this._currentTab = tab;
     return tab;
   }
@@ -249,6 +255,28 @@ export class Context {
     if (!this._currentTab)
       this._currentTab = tab;
     this._startPageVideo(page).catch(() => {});
+  }
+
+  /**
+   * Check if a URL is an internal Electron application URL that should
+   * be hidden from agents. Matches: file://, data:, chrome-extension://,
+   * localhost, 127.0.0.1. Only consulted when `filterInternalUrls` is set.
+   */
+  private _isInternalUrl(url: string): boolean {
+    if (url.startsWith('file://'))
+      return true;
+    if (url.startsWith('data:'))
+      return true;
+    if (url.startsWith('chrome-extension://'))
+      return true;
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
+        return true;
+    } catch {
+      // invalid URL — not internal
+    }
+    return false;
   }
 
   private _onPageClosed(tab: Tab) {
@@ -342,9 +370,16 @@ export class Context {
     for (const initScript of this.config.browser?.initScript || [])
       this._disposables.push(await browserContext.addInitScript({ path: path.resolve(this.options.cwd, initScript) }));
 
-    for (const page of browserContext.pages())
+    for (const page of browserContext.pages()) {
+      if (this.config.filterInternalUrls && this._isInternalUrl(page.url()))
+        continue;
       this._onPageCreated(page);
-    this._disposables.push(eventsHelper.addEventListener(browserContext, 'page', page => this._onPageCreated(page)));
+    }
+    this._disposables.push(eventsHelper.addEventListener(browserContext, 'page', page => {
+      if (this.config.filterInternalUrls && this._isInternalUrl(page.url()))
+        return;
+      this._onPageCreated(page);
+    }));
 
     return browserContext;
   }

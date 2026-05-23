@@ -43,6 +43,7 @@ type Download = {
   download: playwright.Download;
   finished: boolean;
   outputFile: string;
+  savePromise?: Promise<void>;
 };
 
 type ConsoleLogEntry = {
@@ -127,10 +128,14 @@ export class Tab extends EventEmitter<TabEventsInterface> {
         });
       }),
       eventsHelper.addEventListener(p, 'dialog', dialog => this._dialogShown(dialog)),
-      eventsHelper.addEventListener(p, 'download', download => {
-        void this._downloadStarted(download);
-      }),
     ];
+    // When `disableDownloads` is set the embedder's capture stack owns downloads
+    // exclusively; skip Playwright's saveAs() to avoid split ownership.
+    if (!context.config.disableDownloads) {
+      this._disposables.push(eventsHelper.addEventListener(p, 'download', download => {
+        void this._downloadStarted(download);
+      }));
+    }
     // eslint-disable-next-line no-restricted-syntax
     (page as any)[tabSymbol] = this;
     const wallTime = Date.now();
@@ -204,16 +209,19 @@ export class Tab extends EventEmitter<TabEventsInterface> {
   private async _downloadStarted(download: playwright.Download) {
     // Do not trust web names.
     const outputFile = await this.context.outputFile({ suggestedFilename: sanitizeForFilePath(download.suggestedFilename()), prefix: 'download', ext: 'bin' }, { origin: 'code' });
-    const entry = {
+    const entry: Download = {
       download,
       finished: false,
       outputFile,
     };
     this._downloads.push(entry);
     this._addLogEntry({ type: 'download-start', wallTime: Date.now(), download: entry });
-    await download.saveAs(entry.outputFile);
-    entry.finished = true;
-    this._addLogEntry({ type: 'download-finish', wallTime: Date.now(), download: entry });
+    // Capture the save promise so waitForCompletion can await it.
+    entry.savePromise = download.saveAs(entry.outputFile).then(() => {
+      entry.finished = true;
+      this._addLogEntry({ type: 'download-finish', wallTime: Date.now(), download: entry });
+    });
+    await entry.savePromise;
   }
 
   private _clearCollectedArtifacts() {
@@ -445,7 +453,28 @@ export class Tab extends EventEmitter<TabEventsInterface> {
 
   async waitForCompletion(callback: () => Promise<void>) {
     await this._initializedPromise;
+    const beforeCount = this._downloads.length;
     await this._raceAgainstModalStates(() => waitForCompletion(this, callback));
+    await this._waitForPendingDownloads(beforeCount);
+  }
+
+  /**
+   * Wait for downloads that started after `beforeCount` to finish,
+   * with a configurable timeout ceiling (`timeouts.download`, default 30s).
+   * Prevents tools from returning before downloaded files are fully written.
+   */
+  private async _waitForPendingDownloads(beforeCount: number): Promise<void> {
+    const newDownloads = this._downloads.slice(beforeCount);
+    const pending = newDownloads.filter(d => !d.finished && d.savePromise);
+    if (pending.length === 0)
+      return;
+
+    const downloadTimeout = this.context.config.timeouts?.download ?? 30_000;
+    const timeout = new Promise<void>(resolve => setTimeout(resolve, downloadTimeout));
+    await Promise.race([
+      Promise.all(pending.map(d => d.savePromise!.catch(() => {}))),
+      timeout,
+    ]);
   }
 
   async targetLocator(params: { element?: string, target: string }): Promise<{ locator: playwright.Locator, resolved: string }> {

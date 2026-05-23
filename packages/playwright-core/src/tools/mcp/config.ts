@@ -72,10 +72,15 @@ export type CLIOptions = {
   storageState?: string;
   testIdAttribute?: string;
   timeoutAction?: number;
+  timeoutDownload?: number;
   timeoutNavigation?: number;
   userAgent?: string;
   userDataDir?: string;
   viewportSize?: ViewportSize;
+  allowedTools?: string[];
+  filterInternalUrls?: boolean;
+  suppressFocus?: boolean;
+  disableDownloads?: boolean;
 };
 
 const defaultConfig: MergedConfig = {
@@ -87,6 +92,7 @@ const defaultConfig: MergedConfig = {
     action: 5000,
     navigation: 60000,
     expect: 5000,
+    download: 30000,
   },
 };
 
@@ -366,7 +372,12 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
     timeouts: {
       action: cliOptions.timeoutAction,
       navigation: cliOptions.timeoutNavigation,
+      download: cliOptions.timeoutDownload,
     },
+    allowedTools: cliOptions.allowedTools,
+    filterInternalUrls: cliOptions.filterInternalUrls,
+    suppressFocus: cliOptions.suppressFocus,
+    disableDownloads: cliOptions.disableDownloads,
   };
 
   return { ...config, configFile: cliOptions.config };
@@ -415,10 +426,15 @@ export function configFromEnv(env?: NodeJS.ProcessEnv): Config & { configFile?: 
   options.storageState = envToString(e.PLAYWRIGHT_MCP_STORAGE_STATE);
   options.testIdAttribute = envToString(e.PLAYWRIGHT_MCP_TEST_ID_ATTRIBUTE);
   options.timeoutAction = numberParser(e.PLAYWRIGHT_MCP_TIMEOUT_ACTION);
+  options.timeoutDownload = numberParser(e.PLAYWRIGHT_MCP_TIMEOUT_DOWNLOAD);
   options.timeoutNavigation = numberParser(e.PLAYWRIGHT_MCP_TIMEOUT_NAVIGATION);
   options.userAgent = envToString(e.PLAYWRIGHT_MCP_USER_AGENT);
   options.userDataDir = envToString(e.PLAYWRIGHT_MCP_USER_DATA_DIR);
   options.viewportSize = resolutionParser('--viewport-size', e.PLAYWRIGHT_MCP_VIEWPORT_SIZE);
+  options.allowedTools = commaSeparatedList(e.PLAYWRIGHT_MCP_ALLOWED_TOOLS);
+  options.filterInternalUrls = envToBoolean(e.PLAYWRIGHT_MCP_FILTER_INTERNAL_URLS);
+  options.suppressFocus = envToBoolean(e.PLAYWRIGHT_MCP_SUPPRESS_FOCUS);
+  options.disableDownloads = envToBoolean(e.PLAYWRIGHT_MCP_DISABLE_DOWNLOADS);
   return configFromCLIOptions(options);
 }
 

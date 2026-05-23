@@ -161,6 +161,104 @@ test('navigating to download link emits download', async ({ startClient, server,
   });
 });
 
+test('slow download completes before waitForCompletion returns', async ({ startClient, server }, testInfo) => {
+  const { client } = await startClient({
+    config: {
+      outputDir: testInfo.outputPath('output'),
+      timeouts: { download: 30000 },
+    },
+  });
+
+  // Serve a download that takes ~3 seconds to deliver
+  server.setRoute('/slow-download', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': 'attachment; filename=slow-file.bin',
+    });
+    setTimeout(() => {
+      res.end('This file took a while to download');
+    }, 3000);
+  });
+
+  server.setContent('/', `<a href="/slow-download" download="slow-file.bin">Download slow file</a>`, 'text/html');
+
+  expect(await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  })).toHaveResponse({
+    snapshot: expect.stringContaining(`- link "Download slow file" [ref=e2]`),
+  });
+
+  const response = await client.callTool({
+    name: 'browser_click',
+    arguments: {
+      element: 'Download slow file',
+      target: 'e2',
+    },
+  });
+
+  const parsed = parseResponse(response);
+  let events = parsed.events ?? '';
+
+  await expect.poll(async () => {
+    const r = await client.callTool({ name: 'browser_snapshot' });
+    const p = parseResponse(r);
+    if (p.events)
+      events += '\n' + p.events;
+    return events;
+  }, { timeout: 10000 }).toContain(`Downloaded file slow-file.bin`);
+
+  const fs = await import('fs/promises');
+  const files = await fs.readdir(testInfo.outputPath('output'));
+  const slow = files.find(f => f.includes('slow-file'));
+  expect(slow).toBeDefined();
+  const content = await fs.readFile(testInfo.outputPath('output', slow!), 'utf-8');
+  expect(content).toBe('This file took a while to download');
+});
+
+test('download timeout does not block forever', async ({ startClient, server }, testInfo) => {
+  const { client } = await startClient({
+    config: {
+      outputDir: testInfo.outputPath('output'),
+      // Very short timeout (2s) so the test doesn't take long
+      timeouts: { download: 2000 },
+    },
+  });
+
+  // Serve a download that never completes (writes a chunk but never ends)
+  server.setRoute('/hanging-download', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': 'attachment; filename=hang.bin',
+    });
+    res.write('partial data');
+    // intentionally never res.end()
+  });
+
+  server.setContent('/', `<a href="/hanging-download" download="hang.bin">Download hanging file</a>`, 'text/html');
+
+  expect(await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  })).toHaveResponse({
+    snapshot: expect.stringContaining(`- link "Download hanging file" [ref=e2]`),
+  });
+
+  const start = Date.now();
+  await client.callTool({
+    name: 'browser_click',
+    arguments: {
+      element: 'Download hanging file',
+      target: 'e2',
+    },
+  });
+  const elapsed = Date.now() - start;
+
+  // Key assertion: tool did NOT hang waiting for the never-finishing download.
+  // Timeout (2s) + network race + safety buffer.
+  expect(elapsed).toBeLessThan(20000);
+});
+
 test('file upload restricted to roots by default', async ({ startClient, server }, testInfo) => {
   const rootDir = testInfo.outputPath('workspace');
   await fs.mkdir(rootDir, { recursive: true });

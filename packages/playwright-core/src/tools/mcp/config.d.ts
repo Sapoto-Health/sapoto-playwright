@@ -206,6 +206,11 @@ export type Config = {
      * Configures default expect timeout: https://playwright.dev/docs/test-timeouts#expect-timeout. Defaults to 5000ms.
      */
     expect?: number;
+
+    /*
+     * Configures download completion timeout in waitForCompletion. Defaults to 30000ms.
+     */
+    download?: number;
   };
 
   /**
@@ -232,4 +237,33 @@ export type Config = {
    * Specify the language to use for code generation.
    */
   codegen?: 'typescript' | 'none';
+
+  /**
+   * Filter out internal Electron application tabs (file://, data:, chrome-extension://,
+   * localhost, 127.0.0.1) from the tab list so agents never see them.
+   */
+  filterInternalUrls?: boolean;
+
+  /**
+   * If specified, only expose tools whose names are in this list.
+   * Applied after capability filtering.
+   */
+  allowedTools?: string[];
+
+  /**
+   * When true, suppress focus-stealing behaviors at the MCP level. Currently
+   * this skips bringToFront() during tab selection so that agent-driven tab
+   * switches do not raise the browser window on macOS. The complementary
+   * page-side `window.focus`/select-dropdown shims live with the stealth
+   * init script and are gated separately.
+   */
+  suppressFocus?: boolean;
+
+  /**
+   * When true, skip Playwright's page.on('download') registration so the
+   * embedder's capture stack is the sole owner of downloads. Use when an
+   * external CDP Fetch pipeline already handles download capture and
+   * Playwright's saveAs() would create split ownership.
+   */
+  disableDownloads?: boolean;
 };
