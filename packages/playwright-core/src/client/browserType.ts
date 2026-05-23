@@ -15,6 +15,7 @@
  */
 
 import { assert } from '@isomorphic/assert';
+import { resolveCdpStealthAlias } from '@isomorphic/cdpStealthAlias';
 import { headersObjectToArray } from '@isomorphic/headers';
 import { Browser } from './browser';
 import { BrowserContext, prepareBrowserContextParams } from './browserContext';
@@ -67,11 +68,16 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
 
     const logger = options.logger || this._playwright._defaultLaunchOptions?.logger;
     options = { ...this._playwright._defaultLaunchOptions, ...options };
+    // PRD #1045 / Tracer A1: option-parsing-layer alias — translate the
+    // legacy `stealthMode: true` boolean into the new `cdpStealth: string[]`
+    // wire field before the channel validator strips unknown properties.
+    const cdpStealth = resolveCdpStealthAlias(options as any);
     const launchOptions: channels.BrowserTypeLaunchParams = {
       ...options,
       ignoreDefaultArgs: Array.isArray(options.ignoreDefaultArgs) ? options.ignoreDefaultArgs : undefined,
       ignoreAllDefaultArgs: !!options.ignoreDefaultArgs && !Array.isArray(options.ignoreDefaultArgs),
       env: options.env ? envObjectToArray(options.env) : undefined,
+      cdpStealth,
       timeout: new TimeoutSettings(this._platform).launchTimeout(options),
     };
     return await this._wrapApiCall(async () => {
@@ -98,12 +104,17 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
 
     const logger = options.logger || this._playwright._defaultLaunchOptions?.logger;
     const contextParams = await prepareBrowserContextParams(this._platform, options);
+    // PRD #1045 / Tracer A1: option-parsing-layer alias — translate the
+    // legacy `stealthMode: true` boolean into the new `cdpStealth: string[]`
+    // wire field before the channel validator strips unknown properties.
+    const cdpStealth = resolveCdpStealthAlias(options as any);
     const persistentParams: channels.BrowserTypeLaunchPersistentContextParams = {
       ...contextParams,
       ignoreDefaultArgs: Array.isArray(options.ignoreDefaultArgs) ? options.ignoreDefaultArgs : undefined,
       ignoreAllDefaultArgs: !!options.ignoreDefaultArgs && !Array.isArray(options.ignoreDefaultArgs),
       env: options.env ? envObjectToArray(options.env) : undefined,
       channel: options.channel,
+      cdpStealth,
       userDataDir: (this._platform.path().isAbsolute(userDataDir) || !userDataDir) ? userDataDir : this._platform.path().resolve(userDataDir),
       timeout: new TimeoutSettings(this._platform).launchTimeout(options),
     };
@@ -153,8 +164,21 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
     if (this.name() !== 'chromium')
       throw new Error('Connecting over CDP is only supported in Chromium.');
     const headers = params.headers ? headersObjectToArray(params.headers) : undefined;
-    // Fork extension: stealthMode/humanizeInput/suppressFocus are wired through the channel but not in the public api types yet.
-    const forkParams = params as api.ConnectOverCDPOptions & { stealthMode?: boolean, humanizeInput?: boolean, suppressFocus?: boolean };
+    // Fork extensions: humanizeInput/suppressFocus + the new PRD #1045 (Tracer A1)
+    // CDP-stealth feature set are wired through the channel but not in the public
+    // api types yet. The legacy `stealthMode: true` boolean is translated into the
+    // full feature bundle for one release cycle (option-parsing-layer alias);
+    // callers should migrate to `cdpStealth: [...]` directly.
+    const forkParams = params as api.ConnectOverCDPOptions & {
+      stealthMode?: boolean,
+      cdpStealth?: string[],
+      printCapture?: boolean,
+      chromeRuntimeStubs?: boolean,
+      focusEmulation?: boolean,
+      humanizeInput?: boolean,
+      suppressFocus?: boolean,
+    };
+    const cdpStealth = resolveCdpStealthAlias(forkParams as any);
     const result = await this._channel.connectOverCDP({
       endpointURL,
       headers,
@@ -163,7 +187,10 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
       isLocal: params.isLocal,
       noDefaults: params.noDefaults,
       artifactsDir: params.artifactsDir,
-      stealthMode: forkParams.stealthMode,
+      cdpStealth,
+      printCapture: forkParams.printCapture,
+      chromeRuntimeStubs: forkParams.chromeRuntimeStubs,
+      focusEmulation: forkParams.focusEmulation,
       humanizeInput: forkParams.humanizeInput,
       suppressFocus: forkParams.suppressFocus,
     });

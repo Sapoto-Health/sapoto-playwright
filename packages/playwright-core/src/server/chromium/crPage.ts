@@ -510,17 +510,22 @@ class FrameSession {
       // deprecation notices). Console messages come from Runtime.consoleAPICalled instead.
       // Skipping it removes a CDP domain that anti-bot fingerprinters watch for, with no
       // functional impact on MCP tools.
-      ...(this._crPage._browserContext._browser.options.stealthMode ? [] : [this._client.send('Log.enable', {})]),
+      // PRD #1045 / Tracer A1: coarse `cdpStealth.size > 0` check preserves the
+      // previous-generation bundled behavior. A3 will migrate this to the
+      // per-feature check `cdpStealth.has('log-skip')`.
+      ...(this._crPage._browserContext._browser.options.cdpStealth.size > 0 ? [] : [this._client.send('Log.enable', {})]),
       lifecycleEventsEnabled = this._client.send('Page.setLifecycleEventsEnabled', { enabled: true }),
-      // CDP Stealth: when stealthMode is on, use a rapid Runtime.enable → disable cycle.
+      // CDP Stealth: when cdpStealth is non-empty, use a rapid Runtime.enable → disable cycle.
       // The Runtime domain emits `executionContextCreated` synchronously and the events
       // queue as microtasks; we let those drain, then immediately disable so the
       // long-lived Runtime domain (the strongest anti-bot fingerprint — the
       // `console.debug` Proxy trap) is not visible to page scripts.
       // `runIfWaitingForDebugger` runs later in this Promise.all, so the page is still
       // paused while we cycle.
+      // PRD #1045 / Tracer A1: same coarse check; A3 will migrate to
+      // `cdpStealth.has('runtime-cycle')`.
       this._client.send('Runtime.enable', {}).then(() => {
-        if (this._crPage._browserContext._browser.options.stealthMode) {
+        if (this._crPage._browserContext._browser.options.cdpStealth.size > 0) {
           return Promise.resolve().then(() => {
             return this._client._sendMayFail('Runtime.disable');
           });
@@ -665,7 +670,9 @@ class FrameSession {
     // re-enable / disable now (before the new document's scripts run — Page.frameNavigated
     // fires at commit time, ahead of DOMContentLoaded) keeps the contexts visible to
     // Playwright while keeping the Runtime domain dark to page scripts.
-    if (this._crPage._browserContext._browser.options.stealthMode && !initial) {
+    // PRD #1045 / Tracer A1: coarse `cdpStealth.size > 0` check preserves the
+    // previous-generation bundled behavior. A3 will migrate to `cdpStealth.has('runtime-cycle')`.
+    if (this._crPage._browserContext._browser.options.cdpStealth.size > 0 && !initial) {
       // Stale contexts won't be cleared via executionContextsCleared (Runtime is disabled);
       // clear manually before the re-enable below.
       this._onExecutionContextsCleared();

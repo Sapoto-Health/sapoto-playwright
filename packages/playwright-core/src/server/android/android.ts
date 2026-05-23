@@ -363,6 +363,13 @@ export class AndroidDevice extends SdkObject {
         protocolLogger: helper.debugProtocolLogger(),
         browserLogsCollector: new RecentLogsCollector(),
         originalLaunchOptions: {},
+        // PRD #1045 / Tracer A1: Android (clank) does not opt into CDP stealth
+        // or the new fingerprint-mitigation booleans — keep them at the
+        // "no stealth" default. A3/A5 may revisit if Android needs them.
+        cdpStealth: new Set(),
+        printCapture: false,
+        chromeRuntimeStubs: false,
+        focusEmulation: false,
       };
       validateBrowserContextOptions(options, browserOptions);
 

@@ -18,6 +18,7 @@ import EventEmitter from 'events';
 
 import { createGuid } from '@utils/crypto';
 import { isUnderTest } from '@utils/debug';
+import { resolveCdpStealthAlias } from '@isomorphic/cdpStealthAlias';
 import { rewriteErrorMessage } from '@isomorphic/stackTrace';
 import { DEFAULT_PLAYWRIGHT_LAUNCH_TIMEOUT } from '@isomorphic/time';
 import { PlaywrightServer } from './remote/playwrightServer';
@@ -49,11 +50,20 @@ export class BrowserServerLauncherImpl implements BrowserServerLauncher {
       binary: 'buffer',
       isUnderTest,
     } satisfies validatorPrimitives.ValidatorContext;
+    // PRD #1045 / Tracer A1 (Codex P1 follow-up): option-parsing-layer alias —
+    // translate the legacy `stealthMode: true` boolean into the new
+    // `cdpStealth: string[]` wire field before the channel validator strips
+    // unknown properties. Mirrors the `launch` / `launchPersistentContext`
+    // call sites in `client/browserType.ts`; without this, callers that pass
+    // `stealthMode` (e.g. via merged `_defaultLaunchOptions`) silently lose
+    // stealth behavior in the launchServer path.
+    const cdpStealth = resolveCdpStealthAlias(options as any);
     let launchOptions = {
       ...options,
       ignoreDefaultArgs: Array.isArray(options.ignoreDefaultArgs) ? options.ignoreDefaultArgs : undefined,
       ignoreAllDefaultArgs: !!options.ignoreDefaultArgs && !Array.isArray(options.ignoreDefaultArgs),
       env: options.env ? envObjectToArray(options.env) : undefined,
+      cdpStealth,
       timeout: options.timeout ?? DEFAULT_PLAYWRIGHT_LAUNCH_TIMEOUT,
     };
 
@@ -93,6 +103,11 @@ export class BrowserServerLauncherImpl implements BrowserServerLauncher {
     browserServer.kill = () => browser.options.browserProcess.kill();
     (browserServer as any)._disconnectForTest = () => server.close();
     (browserServer as any)._userDataDirForTest = (browser as any)._userDataDirForTest;
+    // PRD #1045 / Tracer A1 (Codex P1 follow-up): expose the server-side
+    // browser for in-process tests that need to verify BrowserOptions
+    // (e.g. that `stealthMode: true` expanded to a populated `cdpStealth` Set
+    // on the launchServer path). Test-only — no public API.
+    (browserServer as any)._preLaunchedBrowserForTest = browser;
     browser.options.browserProcess.onclose = (exitCode, signal) => {
       server.close();
       browserServer.emit('close', exitCode, signal);

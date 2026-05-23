@@ -94,7 +94,12 @@ LaunchOptions:
     chromiumSandbox: boolean?
     firefoxUserPrefs: json?
     cdpPort: int?
-    stealthMode: boolean?
+    cdpStealth:
+      type: array?
+      items: string
+    printCapture: boolean?
+    chromeRuntimeStubs: boolean?
+    focusEmulation: boolean?
     humanizeInput: boolean?
 
 ContextOptions:

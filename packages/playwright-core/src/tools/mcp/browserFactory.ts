@@ -109,6 +109,10 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
   // CDP stealth flag flows in via launchOptions for the launch path; for the CDP-attach
   // path it has to be threaded through connectOverCDP separately.
   // Fork extensions on public LaunchOptions / ConnectOverCDPOptions surfaces:
+  // PRD #1045 / Tracer A1: still reads the legacy `stealthMode` boolean from
+  // launchOptions and forwards it. The client-side `resolveCdpStealthAlias`
+  // turns it into the new `cdpStealth: string[]` wire field. A2 will replace
+  // the CLI / launchOptions surface with the structured feature set.
   const launchOptionsWithFork = config.browser.launchOptions as (playwrightTypes.LaunchOptions & { stealthMode?: boolean }) | undefined;
   const stealthMode = launchOptionsWithFork?.stealthMode === true;
   const connectOptions: playwrightTypes.ConnectOverCDPOptions & { stealthMode?: boolean, suppressFocus?: boolean } = {

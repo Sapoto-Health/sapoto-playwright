@@ -37,6 +37,7 @@ import type { ChildProcess } from 'child_process';
 import type { Language } from '@isomorphic/locatorGenerators';
 import type { Progress } from './progress';
 import type * as playwright from '../..';
+import type { CdpStealthFeature } from './cdpStealth';
 
 export interface BrowserProcess {
   onclose?: ((exitCode: number | null, signal: string | null) => void);
@@ -65,7 +66,18 @@ export type BrowserOptions = {
   originalLaunchOptions: types.LaunchOptions;
   userDataDir?: string;
   noDefaults?: boolean;
-  stealthMode?: boolean;
+  // Sapoto PRD #1045 / Tracer A1: decomposes the previous-generation single
+  // `stealthMode: boolean` into a typed Set of named CDP-stealth features.
+  // Always present (empty Set = no stealth). The dispatcher builds this from
+  // the wire-format `cdpStealth: string[]` and rejects `network-skip`
+  // (see server/cdpStealth.ts for the per-feature rationale).
+  cdpStealth: Set<CdpStealthFeature>;
+  // Sapoto PRD #1045 / Tracer A1: type-only plumbing for the three new
+  // booleans. A5 owns the gating decomposition that consumes them inside
+  // stealthInitScript.ts; A1 just lands the field.
+  printCapture: boolean;
+  chromeRuntimeStubs: boolean;
+  focusEmulation: boolean;
   humanizeInput?: boolean;
   suppressFocus?: boolean;
 };

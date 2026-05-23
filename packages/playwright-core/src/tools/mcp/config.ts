@@ -316,6 +316,12 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
   // so `false` here means `--no-stealth` was passed and `true` would mean a config
   // upstream of CLI). Without this, the CLI path would re-assert `true` every time
   // and stomp PLAYWRIGHT_MCP_STEALTH=0 / config-file `stealth: false`.
+  //
+  // PRD #1045 / Tracer A1: still emits the legacy `stealthMode` boolean here. The
+  // client-side `resolveCdpStealthAlias` translates it into the new
+  // `cdpStealth: string[]` wire field before the channel validator strips it.
+  // Tracer A2 will replace this with a feature-set CLI surface (`--cdp-stealth
+  // runtime-cycle,log-skip,worker-runtime`) that targets `cdpStealth` directly.
   if (cliOptions.stealth !== undefined)
     launchOptions.stealthMode = cliOptions.stealth;
 
