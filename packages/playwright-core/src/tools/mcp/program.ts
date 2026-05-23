@@ -61,6 +61,7 @@ export function decorateMCPCommand(command: Command) {
       .option('--init-script <path...>', 'path to JavaScript file to add as an initialization script. The script will be evaluated in every page before any of the page\'s scripts. Can be specified multiple times.')
       .option('--isolated', 'keep the browser profile in memory, do not save it to disk.')
       .option('--image-responses <mode>', 'whether to send image responses to the client. Can be "allow" or "omit", Defaults to "allow".', enumParser.bind(null, '--image-responses', ['allow', 'omit']))
+      .option('--keep-browser-alive', 'do not close the browser when the last tab closes. Currently a no-op against upstream (which no longer auto-closes), preserved for CLI compat with downstream embedders that manage browser lifecycle externally (e.g., Sapoto Electron/Chrome embedding) and pass this flag.')
       .option('--no-sandbox', 'disable the sandbox for all process types that are normally sandboxed.')
       .option('--output-dir <path>', 'path to the directory for output files.')
       .option('--output-mode <mode>', 'whether to save snapshots, console messages, network logs to a file or to the standard output. Can be "file" or "stdout". Default is "stdout".', enumParser.bind(null, '--output-mode', ['file', 'stdout']))

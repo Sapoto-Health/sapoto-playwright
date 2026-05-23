@@ -268,6 +268,19 @@ export type Config = {
   disableDownloads?: boolean;
 
   /**
+   * When true, do not close the browser when the last tab closes.
+   *
+   * Currently a no-op against this upstream snapshot: the
+   * `closeBrowserContext()`-on-last-tab path that this flag historically
+   * gated has been removed upstream, so the default behavior is already
+   * "keep alive." The field is preserved so downstream embedders (e.g.,
+   * Sapoto, whose four agent runners pass `--keep-browser-alive` because
+   * they manage the browser lifecycle from Electron) do not crash the MCP
+   * child at commander argv parsing.
+   */
+  keepBrowserAlive?: boolean;
+
+  /**
    * CDP stealth mode. When true, Playwright minimizes its CDP-domain
    * footprint (skips Log.enable, gates Network.enable on request interception,
    * rapid-cycles Runtime.enable around context discovery) and injects an

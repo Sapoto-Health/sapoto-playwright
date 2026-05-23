@@ -81,6 +81,11 @@ export type CLIOptions = {
   filterInternalUrls?: boolean;
   suppressFocus?: boolean;
   disableDownloads?: boolean;
+  // Currently a no-op against upstream (which no longer auto-closes the browser
+  // when the last tab closes). Accepted here so commander does not exit 1 on
+  // downstream embedders (e.g., Sapoto's four agent runners pass this flag).
+  // Not threaded into the returned Config — there is no consumer to wire it to.
+  keepBrowserAlive?: boolean;
   stealth?: boolean;
 };
 
@@ -395,6 +400,11 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
     filterInternalUrls: cliOptions.filterInternalUrls,
     suppressFocus: cliOptions.suppressFocus,
     disableDownloads: cliOptions.disableDownloads,
+    // Accepted-but-currently-unconsumed: upstream removed the auto-close path
+    // this flag gated, so it's a no-op today. Threaded through configFromCLIOptions
+    // so downstream embedders (Sapoto) can pass --keep-browser-alive without
+    // commander crashing the MCP child. pickDefined() drops the undefined case.
+    keepBrowserAlive: cliOptions.keepBrowserAlive,
     // CDP stealth: default on. cliOptions.stealth is normalized in program.ts to
     // undefined (not passed) or false (--no-stealth explicit), so pass-through works:
     // undefined gets dropped by pickDefined() during merge, letting env/config-file
@@ -457,6 +467,7 @@ export function configFromEnv(env?: NodeJS.ProcessEnv): Config & { configFile?: 
   options.filterInternalUrls = envToBoolean(e.PLAYWRIGHT_MCP_FILTER_INTERNAL_URLS);
   options.suppressFocus = envToBoolean(e.PLAYWRIGHT_MCP_SUPPRESS_FOCUS);
   options.disableDownloads = envToBoolean(e.PLAYWRIGHT_MCP_DISABLE_DOWNLOADS);
+  options.keepBrowserAlive = envToBoolean(e.PLAYWRIGHT_MCP_KEEP_BROWSER_ALIVE);
   // PLAYWRIGHT_MCP_STEALTH=0 / false disables CDP stealth mode (default on).
   if (e.PLAYWRIGHT_MCP_STEALTH !== undefined)
     options.stealth = envToBoolean(e.PLAYWRIGHT_MCP_STEALTH);
