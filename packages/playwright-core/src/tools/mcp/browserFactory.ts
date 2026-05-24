@@ -126,6 +126,7 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
     printCapture?: boolean,
     chromeRuntimeStubs?: boolean,
     focusEmulation?: boolean,
+    humanizeInput?: boolean,
   }) | undefined;
   const stealthMode = launchOptionsWithFork?.stealthMode === true;
   const connectOptions: playwrightTypes.ConnectOverCDPOptions & {
@@ -135,6 +136,7 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
     chromeRuntimeStubs?: boolean,
     focusEmulation?: boolean,
     suppressFocus?: boolean,
+    humanizeInput?: boolean,
   } = {
     headers: config.browser.cdpHeaders,
     timeout: config.browser.cdpTimeout,
@@ -153,6 +155,11 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
     connectOptions.chromeRuntimeStubs = launchOptionsWithFork.chromeRuntimeStubs;
   if (launchOptionsWithFork?.focusEmulation !== undefined)
     connectOptions.focusEmulation = launchOptionsWithFork.focusEmulation;
+  // humanizeInput was dropped from the CDP-attach path until now — only the
+  // launch path forwarded it via the launchOptions spread. Mirror the same
+  // `!== undefined` guard so --humanize-input works on --cdp-endpoint too.
+  if (launchOptionsWithFork?.humanizeInput !== undefined)
+    connectOptions.humanizeInput = launchOptionsWithFork.humanizeInput;
   // Sapoto #1036: when --suppress-focus is set, thread it through so the chromium
   // server emits `Target.createTarget { background: true }` and Chrome does not
   // steal OS focus on `browser_tabs { action: "new" }`.

@@ -63,8 +63,25 @@ const triggerPrint = defineTabTool({
   },
 
   handle: async (tab, params, response) => {
+    // Probe for the Electron-side bridge BEFORE calling window.print(): the bridge
+    // (window.electronAPI.requestPrintCapture) is what intercepts the print event
+    // and produces a PDF in the Electron host. Without it, window.print() either
+    // pops the native OS dialog (chrome-direct, no stealth init script wired) or
+    // no-ops in headless. The chrome-direct path can ALSO be served by the C4
+    // stealthInitScript `[Print Capture]` marker route, but that path is wired
+    // outside the page (Sapoto's printCapture.ts main-process listener) and we
+    // can't detect it from here. So we report two states honestly: Electron
+    // bridge present (capture is guaranteed) vs not (capture path is
+    // out-of-band; result depends on whether the host wired it).
+    const hasElectronBridge = await tab.page.evaluate(() => {
+      const api = (window as unknown as { electronAPI?: { requestPrintCapture?: unknown } }).electronAPI;
+      return typeof api?.requestPrintCapture === 'function';
+    }).catch(() => false);
     await tab.page.evaluate(() => window.print());
-    response.addTextResult('Print triggered on current page. The system will capture it as a PDF automatically.');
+    const message = hasElectronBridge
+      ? 'Print triggered on current page. Electron bridge detected (window.electronAPI.requestPrintCapture) — the host will capture this as a PDF.'
+      : 'Print triggered on current page. No Electron bridge was detected in-page; PDF capture depends on an out-of-band listener (e.g. Sapoto stealth init script + main-process printCapture handler). If neither is wired the native print dialog may appear or the call may no-op.';
+    response.addTextResult(message);
     response.addCode(`await page.evaluate(() => window.print());`);
   },
 });

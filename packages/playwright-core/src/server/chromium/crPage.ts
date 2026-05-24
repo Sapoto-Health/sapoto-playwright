@@ -1098,6 +1098,12 @@ class FrameSession {
 
     await this._client.send('Emulation.setUserAgentOverride', {
       userAgent: ua, // must be non-empty for CDP to apply userAgentMetadata
+      // Emulation.setUserAgentOverride is a full replace, not a merge. _updateUserAgent
+      // (when options.userAgent || options.locale) sets acceptLanguage in its own
+      // setUserAgentOverride call, and both functions ride the same _initialize
+      // Promise.all. A late brands resolution previously wiped the locale; re-pass it
+      // here so the second call doesn't clobber acceptLanguage when only locale was set.
+      acceptLanguage: options.locale,
       userAgentMetadata: metadata,
     });
   }

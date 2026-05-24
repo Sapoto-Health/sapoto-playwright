@@ -33,7 +33,7 @@ const screenshotSchema = optionalElementSchema.extend({
 
 const ocrScreenshotSchema = z.object({
   filename: z.string().optional().describe('Base filename for output. For tiled captures, files are named {filename}-tile-{n}.png'),
-  tileHeight: z.number().optional().default(800).describe('Max tile height in CSS pixels. Use 0 to disable tiling. Default: 800.'),
+  tileHeight: z.number().int().nonnegative().optional().default(800).describe('Max tile height in CSS pixels. Use 0 to disable tiling. Default: 800.'),
   hideFixed: z.boolean().optional().default(false).describe('Convert position:fixed elements to absolute to prevent repetition across tiles. Default: false.'),
   style: z.string().optional().describe('CSS to inject before capture (e.g., hide decorative elements, increase contrast).'),
 });
