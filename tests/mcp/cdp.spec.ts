@@ -145,13 +145,15 @@ test('cdp server with headers', async ({ startClient, server }) => {
 
 test('hides Sapoto background-bridge hidden targets from browser_tabs (Sapoto-Health/automatic-document-fetcher#1083)', async ({ cdpServer, startClient, server }) => {
   // Sapoto's backgroundOpenBridge spawns hidden CDP targets via
-  // Target.createTarget({background:true}) with an `about:blank#__sapoto_bg=...`
-  // marker URL. Without the fork's filter in `_onPageCreated`, those targets
-  // ARE real pages in the BrowserContext and leak into `browser_tabs`, so the
-  // agent ends up interacting with them as if they were normal tabs (issue
-  // #1083). This spec reproduces the perception leak: it spawns a marked
-  // hidden target via CDP and asserts that `browser_tabs --list` only shows
-  // the legitimate top-level tab, not the hidden one.
+  // Target.createTarget({background:true}) with an
+  // `about:blank#__sapoto_bg=V1:<ts>` marker URL (V1 protocol token mirrors
+  // __SAPOTO_PATHD_BRIDGE_V1__). Without the fork's filter in
+  // `_onPageCreated`, those targets ARE real pages in the BrowserContext and
+  // leak into `browser_tabs`, so the agent ends up interacting with them as
+  // if they were normal tabs (issue #1083). This spec reproduces the
+  // perception leak: it spawns a marked hidden target via CDP and asserts
+  // that `browser_tabs --list` only shows the legitimate top-level tab, not
+  // the hidden one.
   const browserContext = await cdpServer.start();
   const { client } = await startClient({ args: [`--cdp-endpoint=${cdpServer.endpoint}`] });
 
@@ -168,7 +170,7 @@ test('hides Sapoto background-bridge hidden targets from browser_tabs (Sapoto-He
   const [page] = browserContext.pages();
   const cdpSession = await browserContext.newCDPSession(page);
   const created = await cdpSession.send('Target.createTarget', {
-    url: 'about:blank#__sapoto_bg=' + Date.now(),
+    url: 'about:blank#__sapoto_bg=V1:' + Date.now(),
     background: true,
   });
   expect(created.targetId).toBeTruthy();

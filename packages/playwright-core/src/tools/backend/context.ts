@@ -277,19 +277,47 @@ export class Context {
    * to capture popup-PDF downloads without focus theft. Those targets ARE
    * real pages in the BrowserContext, so without this filter they leak into
    * `browser_tabs` and the agent interacts with them as if they were normal
-   * tabs. The bridge creates each hidden target with `about:blank#__sapoto_bg=...`
-   * so we can recognise it here, BEFORE the bridge's subsequent Page.navigate
-   * replaces the URL with the real download URL. The 'page' event fires
-   * synchronously when the page is added to the BrowserContext, with the
-   * URL still set to the value passed to Target.createTarget — so reading
-   * page.url() at listener entry sees the marker even though it changes
-   * later.
+   * tabs. The bridge creates each hidden target with
+   * `about:blank#__sapoto_bg=V1:<ts>` so we can recognise it here, BEFORE
+   * the bridge's subsequent Page.navigate replaces the URL with the real
+   * download URL.
+   *
+   * The 'page' event is emitted from Page._markInitialized (page.ts:246),
+   * which fires after CRPage._mainFrameSession._initialize()'s Promise.all
+   * resolves (crPage.ts:111-113, :580). The race-free guarantee that
+   * page.url() reads the marker URL at listener entry rests on three
+   * invariants:
+   *
+   *   1. Target.setAutoAttach({waitForDebuggerOnStart: true}) at the browser
+   *      root (crBrowser.ts:83/88) pauses every new target's renderer at
+   *      creation.
+   *   2. Inside Page.getFrameTree.then() (crPage.ts:471-505), _handleFrameTree
+   *      synchronously commits the initial frame URL to Frame._url via
+   *      frameCommittedNewDocumentNavigation (frames.ts:221).
+   *   3. Sapoto bridge's CDP child session is a separate WebSocket
+   *      (cdpSessionFactory.ts:79 in Sapoto repo) and does NOT send
+   *      Runtime.runIfWaitingForDebugger. Its Page.navigate can't commit
+   *      while the renderer is paused.
+   *
+   * If any of these invariants change (e.g. upstream drops
+   * waitForDebuggerOnStart, or the bridge starts sending
+   * runIfWaitingForDebugger), this filter regresses to a TOCTOU race.
+   *
+   * SECURITY LIMITATION (documented, not fixed): the marker is a public,
+   * predictable URL pattern. A hostile page already loaded in the agent's
+   * BrowserContext can call window.open('about:blank#__sapoto_bg=V1:evil',
+   * '_blank') and the popup becomes invisible to the agent. Mitigation
+   * requires a target-ID registry (the bridge tells the fork which
+   * targetIds to hide via a side channel) OR a per-session HMAC marker —
+   * both larger architectural changes. Tracked as a follow-up to #1083.
    *
    * Refs: Sapoto-Health/automatic-document-fetcher#1083 (perception leak)
    * Refs: Sapoto-Health/automatic-document-fetcher#1044 (Arch A bridge)
    */
   private _isSapotoBackgroundTarget(url: string): boolean {
-    return url.startsWith('about:blank#__sapoto_bg=');
+    // V1 protocol token mirrors __SAPOTO_PATHD_BRIDGE_V1__ — bump on
+    // incompatible changes so old/new code can detect mismatch.
+    return url.startsWith('about:blank#__sapoto_bg=V1:');
   }
 
   /**
