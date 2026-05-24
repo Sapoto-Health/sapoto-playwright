@@ -272,6 +272,27 @@ export class Context {
   }
 
   /**
+   * Sapoto Architecture A: the backgroundOpenBridge in the Sapoto Electron
+   * app spawns hidden CDP targets via Target.createTarget({background:true})
+   * to capture popup-PDF downloads without focus theft. Those targets ARE
+   * real pages in the BrowserContext, so without this filter they leak into
+   * `browser_tabs` and the agent interacts with them as if they were normal
+   * tabs. The bridge creates each hidden target with `about:blank#__sapoto_bg=...`
+   * so we can recognise it here, BEFORE the bridge's subsequent Page.navigate
+   * replaces the URL with the real download URL. The 'page' event fires
+   * synchronously when the page is added to the BrowserContext, with the
+   * URL still set to the value passed to Target.createTarget — so reading
+   * page.url() at listener entry sees the marker even though it changes
+   * later.
+   *
+   * Refs: Sapoto-Health/automatic-document-fetcher#1083 (perception leak)
+   * Refs: Sapoto-Health/automatic-document-fetcher#1044 (Arch A bridge)
+   */
+  private _isSapotoBackgroundTarget(url: string): boolean {
+    return url.startsWith('about:blank#__sapoto_bg=');
+  }
+
+  /**
    * Check if a URL is an internal Electron application URL that should
    * be hidden from agents. Matches: file://, data:, chrome-extension://,
    * localhost, 127.0.0.1. Only consulted when `filterInternalUrls` is set.
@@ -403,12 +424,18 @@ export class Context {
     }
 
     for (const page of browserContext.pages()) {
-      if (this.config.filterInternalUrls && this._isInternalUrl(page.url()))
+      const url = page.url();
+      if (this._isSapotoBackgroundTarget(url))
+        continue;
+      if (this.config.filterInternalUrls && this._isInternalUrl(url))
         continue;
       this._onPageCreated(page);
     }
     this._disposables.push(eventsHelper.addEventListener(browserContext, 'page', page => {
-      if (this.config.filterInternalUrls && this._isInternalUrl(page.url()))
+      const url = page.url();
+      if (this._isSapotoBackgroundTarget(url))
+        return;
+      if (this.config.filterInternalUrls && this._isInternalUrl(url))
         return;
       this._onPageCreated(page);
     }));
