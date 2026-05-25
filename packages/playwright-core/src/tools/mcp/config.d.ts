@@ -30,6 +30,48 @@ export type ToolCapability =
   'vision' |
   'devtools';
 
+export type SapotoRuntimePolicy = {
+  /**
+   * Enables runtime diagnostics that can observe page console output.
+   */
+  runtimeDiagnostics?: boolean;
+
+  /**
+   * Enables RCE-equivalent Playwright server code execution for local debugging only.
+   */
+  unsafeCodeTool?: boolean;
+
+  /**
+   * Enables scoped Fetch body capture for download fallback diagnostics.
+   */
+  fetchBodyCapture?: boolean;
+
+  /**
+   * Enables isolated-world page bridges for popup/download fallback diagnostics.
+   */
+  isolatedWorldBridge?: boolean;
+
+  /**
+   * Enables console-marker bridges for fallback diagnostics.
+   */
+  consoleMarkerBridge?: boolean;
+
+  /**
+   * Enables main-world bridges for fallback diagnostics.
+   */
+  mainWorldBridge?: boolean;
+
+  /**
+   * Enables background-open bridge fallback diagnostics.
+   */
+  backgroundOpenBridge?: boolean;
+
+  /**
+   * Enables automatic print capture fallback diagnostics.
+   */
+  autoPrintCapture?: boolean;
+};
+
 export type Config = {
   /**
    * The browser to use.
@@ -50,6 +92,11 @@ export type Config = {
      * Temporary directory is created by default.
      */
     userDataDir?: string;
+
+    /**
+     * Use Sapoto's private standalone Chrome runtime defaults.
+     */
+    sapotoRuntime?: boolean;
 
     /**
      * Launch options passed to
@@ -136,6 +183,11 @@ export type Config = {
    *   - 'devtools': Developer tools features.
    */
   capabilities?: ToolCapability[];
+
+  /**
+   * Explicit fallback flags for Sapoto's private standalone Chrome runtime.
+   */
+  sapotoRuntimePolicy?: SapotoRuntimePolicy;
 
   /**
    * Whether to save the Playwright session into the output directory.

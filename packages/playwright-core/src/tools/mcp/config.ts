@@ -26,6 +26,10 @@ import { configFromIniFile } from './configIni';
 import type * as playwrightTypes from '../../..';
 import type { Config, ToolCapability } from './config.d';
 
+type InternalBrowserContextOptions = Omit<playwrightTypes.BrowserContextOptions, 'acceptDownloads'> & {
+  acceptDownloads?: playwrightTypes.BrowserContextOptions['acceptDownloads'] | 'internal-browser-default';
+};
+
 async function fileExistsAsync(resolved: string) {
   try { return (await fs.promises.stat(resolved)).isFile(); } catch { return false; }
 }
@@ -108,6 +112,7 @@ export type FullConfig = MergedConfig & {
 
 export async function resolveConfig(config: Config): Promise<FullConfig> {
   const merged = mergeConfig(defaultConfig, config);
+  validateSapotoRuntimeScope(merged);
   const browser = await validateBrowserConfig(merged.browser);
   return { ...merged, browser };
 }
@@ -124,6 +129,7 @@ export async function resolveCLIConfigForMCP(cliOptions: CLIOptions, env?: NodeJ
   result = mergeConfig(result, resolveConfigPaths(envOverrides, process.cwd()));
   result = mergeConfig(result, resolveConfigPaths(cliOverrides, process.cwd()));
 
+  validateSapotoRuntimeScope(result);
   const browser = await validateBrowserConfig(result.browser);
   if (browser.launchOptions.headless === undefined)
     browser.launchOptions.headless = os.platform() === 'linux' && !process.env.DISPLAY;
@@ -178,6 +184,7 @@ export async function resolveCLIConfigForCLI(daemonProfilesDir: string, sessionN
   if (result.browser.isolated === undefined)
     result.browser.isolated = !options.profile && !options.persistent && !result.browser.userDataDir && !result.browser.remoteEndpoint && !result.browser.cdpEndpoint && !result.extension;
 
+  validateSapotoRuntimeScope(result);
   if (result.browser.launchOptions.headless === undefined)
     result.browser.launchOptions.headless = true;
 
@@ -193,6 +200,13 @@ export async function resolveCLIConfigForCLI(daemonProfilesDir: string, sessionN
   }
 
   return { ...result, browser, configFile, skillMode: true };
+}
+
+function validateSapotoRuntimeScope(config: MergedConfig) {
+  if (!config.browser.sapotoRuntime)
+    return;
+  if (config.extension || config.browser.isolated || config.browser.cdpEndpoint || config.browser.remoteEndpoint)
+    throw new Error('Sapoto runtime requires a persistent local browser profile.');
 }
 
 export function resolveExtensionOptions(cliOptions: CLIOptions): { channel: string, executablePath?: string } {
@@ -244,6 +258,18 @@ async function validateBrowserConfig(browser: MergedConfig['browser']): Promise<
     browser.launchOptions.args = browser.launchOptions.args ?? [];
     if (!browser.launchOptions.args.some(a => a.includes('--disable-blink-features')))
       browser.launchOptions.args.push(`--disable-blink-features=AutomationControlled`);
+  }
+
+  if (browser.sapotoRuntime) {
+    if (browserName !== 'chromium')
+      throw new Error('Sapoto runtime is only supported for Chromium browsers.');
+    browser.launchOptions.headless ??= false;
+    (browser.contextOptions as InternalBrowserContextOptions).acceptDownloads = 'internal-browser-default';
+    browser.launchOptions.args = browser.launchOptions.args ?? [];
+    if (browser.launchOptions.args.includes('--enable-automation'))
+      throw new Error('Sapoto runtime does not support --enable-automation.');
+    if (browser.launchOptions.args.includes('--remote-debugging-port=0'))
+      throw new Error('Sapoto runtime requires an explicit nonzero remote debugging port.');
   }
 
   return { ...browser, browserName };
@@ -479,6 +505,10 @@ function mergeConfig(base: MergedConfig, overrides: Config): MergedConfig {
     network: {
       ...pickDefined(base.network),
       ...pickDefined(overrides.network),
+    },
+    sapotoRuntimePolicy: {
+      ...pickDefined(base.sapotoRuntimePolicy),
+      ...pickDefined(overrides.sapotoRuntimePolicy),
     },
     server: {
       ...pickDefined(base.server),

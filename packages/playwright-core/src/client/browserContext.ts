@@ -563,9 +563,11 @@ export async function prepareBrowserContextParams(platform: Platform, options: B
   return contextParams;
 }
 
-function toAcceptDownloadsProtocol(acceptDownloads?: boolean) {
+function toAcceptDownloadsProtocol(acceptDownloads?: boolean | 'internal-browser-default') {
   if (acceptDownloads === undefined)
     return undefined;
+  if (acceptDownloads === 'internal-browser-default')
+    return acceptDownloads;
   if (acceptDownloads)
     return 'accept';
   return 'deny';

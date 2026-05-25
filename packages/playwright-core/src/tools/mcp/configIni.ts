@@ -105,6 +105,7 @@ const longhandTypes: Record<string, LonghandType> = {
   'browser.browserName': 'string',
   'browser.isolated': 'boolean',
   'browser.userDataDir': 'string',
+  'browser.sapotoRuntime': 'boolean',
   'browser.cdpEndpoint': 'string',
   'browser.cdpTimeout': 'number',
   'browser.remoteEndpoint': 'string',
@@ -165,6 +166,14 @@ const longhandTypes: Record<string, LonghandType> = {
   'allowUnrestrictedFileAccess': 'boolean',
   'codegen': 'string',
   'testIdAttribute': 'string',
+  'sapotoRuntimePolicy.runtimeDiagnostics': 'boolean',
+  'sapotoRuntimePolicy.unsafeCodeTool': 'boolean',
+  'sapotoRuntimePolicy.fetchBodyCapture': 'boolean',
+  'sapotoRuntimePolicy.isolatedWorldBridge': 'boolean',
+  'sapotoRuntimePolicy.consoleMarkerBridge': 'boolean',
+  'sapotoRuntimePolicy.mainWorldBridge': 'boolean',
+  'sapotoRuntimePolicy.backgroundOpenBridge': 'boolean',
+  'sapotoRuntimePolicy.autoPrintCapture': 'boolean',
 
   // server
   'server.port': 'number',
