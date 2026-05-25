@@ -16,6 +16,13 @@
 
 import type * as playwright from '../../..';
 
+type SapotoLaunchOptions = playwright.LaunchOptions & {
+  /**
+   * CDP stealth features to apply when launching or attaching to Chromium.
+   */
+  cdpStealth?: string[];
+};
+
 export type ToolCapability =
   'config' |
   'core' |
@@ -29,6 +36,48 @@ export type ToolCapability =
   'testing' |
   'vision' |
   'devtools';
+
+export type SapotoRuntimePolicy = {
+  /**
+   * Enables runtime diagnostics that can observe page console output.
+   */
+  runtimeDiagnostics?: boolean;
+
+  /**
+   * Enables RCE-equivalent Playwright server code execution for local debugging only.
+   */
+  unsafeCodeTool?: boolean;
+
+  /**
+   * Enables scoped Fetch body capture for download fallback diagnostics.
+   */
+  fetchBodyCapture?: boolean;
+
+  /**
+   * Enables isolated-world page bridges for popup/download fallback diagnostics.
+   */
+  isolatedWorldBridge?: boolean;
+
+  /**
+   * Enables console-marker bridges for fallback diagnostics.
+   */
+  consoleMarkerBridge?: boolean;
+
+  /**
+   * Enables main-world bridges for fallback diagnostics.
+   */
+  mainWorldBridge?: boolean;
+
+  /**
+   * Enables background-open bridge fallback diagnostics.
+   */
+  backgroundOpenBridge?: boolean;
+
+  /**
+   * Enables automatic print capture fallback diagnostics.
+   */
+  autoPrintCapture?: boolean;
+};
 
 export type Config = {
   /**
@@ -52,12 +101,17 @@ export type Config = {
     userDataDir?: string;
 
     /**
+     * Use Sapoto's private standalone Chrome runtime defaults.
+     */
+    sapotoRuntime?: boolean;
+
+    /**
      * Launch options passed to
      * @see https://playwright.dev/docs/api/class-browsertype#browser-type-launch-persistent-context
      *
      * This is useful for settings options like `channel`, `headless`, `executablePath`, etc.
      */
-    launchOptions?: playwright.LaunchOptions;
+    launchOptions?: SapotoLaunchOptions;
 
     /**
      * Context options for the browser context.
@@ -136,6 +190,11 @@ export type Config = {
    *   - 'devtools': Developer tools features.
    */
   capabilities?: ToolCapability[];
+
+  /**
+   * Explicit fallback flags for Sapoto's private standalone Chrome runtime.
+   */
+  sapotoRuntimePolicy?: SapotoRuntimePolicy;
 
   /**
    * Whether to save the Playwright session into the output directory.

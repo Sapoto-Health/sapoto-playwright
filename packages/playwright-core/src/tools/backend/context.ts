@@ -49,6 +49,10 @@ export type ContextConfig = {
   saveSession?: boolean;
   saveTrace?: boolean;
   secrets?: Record<string, string>;
+  sapotoRuntimePolicy?: {
+    runtimeDiagnostics?: boolean;
+    unsafeCodeTool?: boolean;
+  };
   snapshot?: {
     mode?: 'full' | 'none';
   };
@@ -59,6 +63,7 @@ export type ContextConfig = {
     expect?: number;
   };
   browser?: {
+    sapotoRuntime?: boolean;
     initScript?: string[];
     initPage?: string[];
   };

@@ -23,7 +23,7 @@ import { test, expect } from './fixtures';
 import { tools } from '../../packages/playwright-core/lib/coreBundle';
 import type { Config } from '../../packages/playwright-core/src/tools/mcp/config.d';
 
-const { resolveCLIConfigForCLI, resolveCLIConfigForMCP, isSystemDirectory, outputDir } = tools;
+const { resolveCLIConfigForCLI, resolveCLIConfigForMCP, filteredTools, isSystemDirectory, outputDir } = tools;
 
 // Empty env to isolate tests from the host environment.
 const emptyEnv = {};
@@ -99,6 +99,78 @@ test.describe('browserName and channel', () => {
     await fs.promises.writeFile(configFile, JSON.stringify({ browser: { browserName: 'firefox' } }));
     const config = await resolveCLIConfigForMCP({ config: configFile, browser: 'webkit' }, emptyEnv);
     expect(config.browser.browserName).toBe('webkit');
+  });
+});
+
+test.describe('Sapoto Chrome runtime', () => {
+  test('defaults CDP stealth to all features for MCP sessions', async () => {
+    const config = await resolveCLIConfigForMCP({}, emptyEnv);
+    expect(config.browser.launchOptions.cdpStealth).toEqual(['runtime-cycle', 'log-skip', 'worker-runtime']);
+  });
+
+  test('allows CDP stealth to be explicitly disabled', async () => {
+    const config = await resolveCLIConfigForMCP({ cdpStealth: [] }, emptyEnv);
+    expect(config.browser.launchOptions.cdpStealth).toEqual([]);
+  });
+
+  test('keeps config resolution side-effect free while setting strict defaults', async ({}, testInfo) => {
+    const configFile = testInfo.outputPath('config.json');
+    await fs.promises.writeFile(configFile, JSON.stringify({
+      browser: {
+        sapotoRuntime: true,
+      },
+    }));
+
+    const config = await resolveCLIConfigForMCP({ config: configFile, headless: false }, emptyEnv);
+    const args = config.browser.launchOptions.args || [];
+
+    expect(config.browser.browserName).toBe('chromium');
+    expect(args).not.toContain('--enable-automation');
+    expect(args).not.toContain('--remote-debugging-port=0');
+    expect(config.browser.contextOptions.acceptDownloads).toBe('internal-browser-default');
+  });
+
+  test('rejects launch modes that bypass the persistent Sapoto profile', async ({}, testInfo) => {
+    const configFile = testInfo.outputPath('config.json');
+    await fs.promises.writeFile(configFile, JSON.stringify({ browser: { sapotoRuntime: true } }));
+
+    await expect(resolveCLIConfigForMCP({ isolated: true, config: configFile }, emptyEnv))
+        .rejects.toThrow('Sapoto runtime requires a persistent local browser profile.');
+    await expect(resolveCLIConfigForMCP({ cdpEndpoint: 'http://localhost:9222', config: configFile }, emptyEnv))
+        .rejects.toThrow('Sapoto runtime requires a persistent local browser profile.');
+    await expect(resolveCLIConfigForMCP({ endpoint: 'ws://localhost:1234', config: configFile }, emptyEnv))
+        .rejects.toThrow('Sapoto runtime requires a persistent local browser profile.');
+    await expect(resolveCLIConfigForMCP({ extension: true, config: configFile }, emptyEnv))
+        .rejects.toThrow('Sapoto runtime requires a persistent local browser profile.');
+  });
+
+  test('keeps unsafe runtime tools behind explicit fallback flags', async ({}, testInfo) => {
+    const configFile = testInfo.outputPath('config.json');
+    const writeConfig = async (config: Config) => fs.promises.writeFile(configFile, JSON.stringify(config));
+
+    await writeConfig({
+      browser: {
+        sapotoRuntime: true,
+      },
+    });
+    const strictConfig = await resolveCLIConfigForMCP({ config: configFile }, emptyEnv);
+    const strictToolNames = filteredTools(strictConfig).map(tool => tool.schema.name);
+    expect(strictToolNames).not.toContain('browser_run_code_unsafe');
+    expect(strictToolNames).not.toContain('browser_console_messages');
+
+    await writeConfig({
+      browser: {
+        sapotoRuntime: true,
+      },
+      sapotoRuntimePolicy: {
+        runtimeDiagnostics: true,
+        unsafeCodeTool: true,
+      },
+    });
+    const fallbackConfig = await resolveCLIConfigForMCP({ config: configFile }, emptyEnv);
+    const fallbackToolNames = filteredTools(fallbackConfig).map(tool => tool.schema.name);
+    expect(fallbackToolNames).toContain('browser_run_code_unsafe');
+    expect(fallbackToolNames).toContain('browser_console_messages');
   });
 });
 

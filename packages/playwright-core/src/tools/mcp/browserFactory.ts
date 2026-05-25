@@ -16,6 +16,7 @@
 
 import crypto from 'crypto';
 import fs from 'fs';
+import net from 'net';
 import path from 'path';
 
 import { playwright } from '../../inprocess';
@@ -105,11 +106,15 @@ async function createIsolatedBrowser(config: FullConfig, clientInfo: ClientInfo)
 async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Promise<playwrightTypes.Browser> {
   testDebug('create browser (cdp)');
   const artifactsDir = await computeTracesDir(config, clientInfo);
+  const launchOptions = config.browser.launchOptions as playwrightTypes.LaunchOptions & {
+    cdpStealth?: string[],
+  };
   const browser = await playwright.chromium.connectOverCDP(config.browser.cdpEndpoint!, {
     headers: config.browser.cdpHeaders,
     timeout: config.browser.cdpTimeout,
     artifactsDir,
-  });
+    cdpStealth: launchOptions.cdpStealth,
+  } as playwrightTypes.ConnectOverCDPOptions & { cdpStealth?: string[] });
   return browser;
 }
 
@@ -165,6 +170,8 @@ async function createPersistentBrowser(config: FullConfig, clientInfo: ClientInf
         ...Array.isArray(configIgnoreDefaultArgs) ? configIgnoreDefaultArgs : [],
       ],
   };
+  if (config.browser.sapotoRuntime)
+    await prepareSapotoChromeRuntimeProfile(userDataDir, launchOptions);
   try {
     const browserContext = await browserType.launchPersistentContext(userDataDir, launchOptions);
     const browser = browserContext.browser()!;
@@ -184,11 +191,55 @@ async function createPersistentBrowser(config: FullConfig, clientInfo: ClientInf
 async function createUserDataDir(config: FullConfig, clientInfo: ClientInfo) {
   const dir = process.env.PWMCP_PROFILES_DIR_FOR_TEST ?? registryDirectory;
   const browserToken = config.browser.launchOptions?.channel ?? config.browser?.browserName;
+  const profilePrefix = config.browser.sapotoRuntime ? 'sapoto' : 'mcp';
   // Hesitant putting hundreds of files into the user's workspace, so using it for hashing instead.
   const rootPathToken = createHash(clientInfo.cwd);
-  const result = path.join(dir, `mcp-${browserToken}-${rootPathToken}`);
+  const result = path.join(dir, `${profilePrefix}-${browserToken}-${rootPathToken}`);
   await fs.promises.mkdir(result, { recursive: true });
   return result;
+}
+
+async function prepareSapotoChromeRuntimeProfile(userDataDir: string, launchOptions: playwrightTypes.LaunchOptions & playwrightTypes.BrowserContextOptions) {
+  launchOptions.args = launchOptions.args ?? [];
+  if (!launchOptions.args.some(arg => arg.startsWith('--remote-debugging-port=')))
+    launchOptions.args.push(`--remote-debugging-port=${await findFreePort()}`);
+  await seedSapotoChromePreferences(userDataDir);
+}
+
+async function findFreePort(): Promise<number> {
+  const server = net.createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  if (!address || typeof address === 'string')
+    throw new Error('Unable to allocate a local remote debugging port.');
+  return address.port;
+}
+
+async function seedSapotoChromePreferences(userDataDir: string): Promise<void> {
+  const defaultProfileDir = path.join(userDataDir, 'Default');
+  await fs.promises.mkdir(defaultProfileDir, { recursive: true });
+  const preferencesPath = path.join(defaultProfileDir, 'Preferences');
+  let preferences: any = {};
+  try {
+    preferences = JSON.parse(await fs.promises.readFile(preferencesPath, 'utf8'));
+  } catch (error: any) {
+    if (error.code !== 'ENOENT')
+      throw error;
+  }
+  preferences.download = {
+    ...preferences.download,
+    default_directory: path.join(userDataDir, 'Sapoto Downloads'),
+    prompt_for_download: false,
+  };
+  preferences.plugins = {
+    ...preferences.plugins,
+    always_open_pdf_externally: true,
+  };
+  await fs.promises.writeFile(preferencesPath, JSON.stringify(preferences, undefined, 2));
 }
 
 function createHash(data: string): string {

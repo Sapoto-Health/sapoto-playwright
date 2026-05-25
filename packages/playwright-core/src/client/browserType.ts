@@ -153,6 +153,9 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
     if (this.name() !== 'chromium')
       throw new Error('Connecting over CDP is only supported in Chromium.');
     const headers = params.headers ? headersObjectToArray(params.headers) : undefined;
+    const sapotoParams = params as api.ConnectOverCDPOptions & {
+      cdpStealth?: string[];
+    };
     const result = await this._channel.connectOverCDP({
       endpointURL,
       headers,
@@ -161,6 +164,7 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
       isLocal: params.isLocal,
       noDefaults: params.noDefaults,
       artifactsDir: params.artifactsDir,
+      cdpStealth: sapotoParams.cdpStealth,
     });
     return await this._browserFromConnectResult(result);
   }

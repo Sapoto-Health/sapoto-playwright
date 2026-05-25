@@ -18,6 +18,7 @@
 import { assert } from '@isomorphic/assert';
 import { rewriteErrorMessage } from '@isomorphic/stackTrace';
 import { eventsHelper } from '@utils/eventsHelper';
+import { shouldCycleRuntime, shouldSkipLogEnable } from './cdpStealthGates';
 import * as dialog from '../dialog';
 import * as dom from '../dom';
 import * as frames from '../frames';
@@ -501,9 +502,12 @@ class FrameSession {
           this._eventListeners.push(eventsHelper.addEventListener(this._client, 'Page.lifecycleEvent', event => this._onLifecycleEvent(event)));
         }
       }),
-      this._client.send('Log.enable', {}),
+      ...(shouldSkipLogEnable(this._crPage._browserContext._browser.options.cdpStealth) ? [] : [this._client.send('Log.enable', {})]),
       lifecycleEventsEnabled = this._client.send('Page.setLifecycleEventsEnabled', { enabled: true }),
-      this._client.send('Runtime.enable', {}),
+      this._client.send('Runtime.enable', {}).then(() => {
+        if (shouldCycleRuntime(this._crPage._browserContext._browser.options.cdpStealth))
+          return this._client._sendMayFail('Runtime.disable');
+      }),
       this._client.send('Page.addScriptToEvaluateOnNewDocument', {
         source: '',
         worldName: this._crPage.utilityWorldName,
@@ -629,6 +633,10 @@ class FrameSession {
     this._page.frameManager.frameCommittedNewDocumentNavigation(framePayload.id, framePayload.url + (framePayload.urlFragment || ''), framePayload.name || '', framePayload.loaderId, initial);
     if (!initial)
       this._firstNonInitialNavigationCommittedFulfill();
+    if (shouldCycleRuntime(this._crPage._browserContext._browser.options.cdpStealth) && !initial) {
+      this._onExecutionContextsCleared();
+      this._client.send('Runtime.enable', {}).then(() => this._client._sendMayFail('Runtime.disable')).catch(() => {});
+    }
   }
 
   _onFrameRequestedNavigation(payload: Protocol.Page.frameRequestedNavigationPayload) {

@@ -72,15 +72,29 @@ export const browserTools: Tool<any>[] = [
   ...webstorage,
 ];
 
-export function filteredTools(config: Pick<ContextConfig, 'capabilities'>) {
-  return browserTools.filter(tool => tool.capability.startsWith('core') || config.capabilities?.includes(tool.capability)).filter(tool => !tool.skillOnly).map(tool => ({
-    ...tool,
-    schema: {
-      ...tool.schema,
-      // Note: we first ensure that "selector" property is present, so that we can omit() it without an error.
-      inputSchema: tool.schema.inputSchema
-          .extend({ selector: z.string(), startSelector: z.string(), endSelector: z.string() })
-          .omit({ selector: true, startSelector: true, endSelector: true }),
-    },
-  }));
+function isSapotoRuntimeToolAllowed(tool: Tool<any>, config: Pick<ContextConfig, 'browser' | 'sapotoRuntimePolicy'>) {
+  if (!config.browser?.sapotoRuntime)
+    return true;
+  if (tool.schema.name === 'browser_console_messages')
+    return !!config.sapotoRuntimePolicy?.runtimeDiagnostics;
+  if (tool.schema.name === 'browser_run_code_unsafe')
+    return !!config.sapotoRuntimePolicy?.unsafeCodeTool;
+  return true;
+}
+
+export function filteredTools(config: Pick<ContextConfig, 'capabilities' | 'browser' | 'sapotoRuntimePolicy'>) {
+  return browserTools
+      .filter(tool => tool.capability.startsWith('core') || config.capabilities?.includes(tool.capability))
+      .filter(tool => !tool.skillOnly)
+      .filter(tool => isSapotoRuntimeToolAllowed(tool, config))
+      .map(tool => ({
+        ...tool,
+        schema: {
+          ...tool.schema,
+          // Note: we first ensure that "selector" property is present, so that we can omit() it without an error.
+          inputSchema: tool.schema.inputSchema
+              .extend({ selector: z.string(), startSelector: z.string(), endSelector: z.string() })
+              .omit({ selector: true, startSelector: true, endSelector: true }),
+        },
+      }));
 }

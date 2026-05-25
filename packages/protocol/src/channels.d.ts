@@ -2067,6 +2067,7 @@ export type BrowserTypeConnectOverCDPParams = {
   isLocal?: boolean,
   noDefaults?: boolean,
   artifactsDir?: string,
+  cdpStealth?: string[],
 };
 export type BrowserTypeConnectOverCDPOptions = {
   headers?: NameValue[],
@@ -2074,6 +2075,7 @@ export type BrowserTypeConnectOverCDPOptions = {
   isLocal?: boolean,
   noDefaults?: boolean,
   artifactsDir?: string,
+  cdpStealth?: string[],
 };
 export type BrowserTypeConnectOverCDPResult = {
   browser: BrowserChannel,

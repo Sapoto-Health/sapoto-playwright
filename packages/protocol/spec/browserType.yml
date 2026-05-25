@@ -52,6 +52,9 @@ BrowserType:
         isLocal: boolean?
         noDefaults: boolean?
         artifactsDir: string?
+        cdpStealth:
+          type: array?
+          items: string
       returns:
         browser: Browser
         defaultContext: BrowserContext?

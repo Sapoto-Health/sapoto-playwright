@@ -1094,6 +1094,7 @@ scheme.BrowserTypeConnectOverCDPParams = tObject({
   isLocal: tOptional(tBoolean),
   noDefaults: tOptional(tBoolean),
   artifactsDir: tOptional(tString),
+  cdpStealth: tOptional(tArray(tString)),
 });
 scheme.BrowserTypeConnectOverCDPResult = tObject({
   browser: tChannel(['Browser']),

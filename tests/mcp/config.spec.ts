@@ -15,6 +15,7 @@
  */
 
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { test, expect, parseResponse } from './fixtures';
 import type { Config } from '../../packages/playwright-core/src/tools/mcp/config.d';
@@ -134,6 +135,143 @@ test('config ignoreDefaultArgs merged with persistent mode defaults', async ({ s
   // Other default args should still be present.
   expect(commandLine).toContain('--use-mock-keychain');
 });
+
+test('Sapoto runtime launches Chrome with explicit CDP port and no automation switches', async ({ startClient, mcpBrowser, server }, testInfo) => {
+  test.skip(!['chrome', 'chromium', 'msedge'].includes(mcpBrowser!), 'Sapoto runtime is Chromium-specific');
+
+  const { client } = await startClient({
+    config: {
+      browser: {
+        sapotoRuntime: true,
+      },
+    },
+  });
+
+  await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: 'chrome://version' },
+  });
+
+  const commandLineResult = await client.callTool({
+    name: 'browser_evaluate',
+    arguments: { function: '() => document.getElementById("command_line").innerText' },
+  });
+  const commandLine = commandLineResult.content[0].text;
+  expect(commandLine).toMatch(/--remote-debugging-port=(?!0(?:\s|$))\d+/);
+  expect(commandLine).not.toContain('--remote-debugging-port=0');
+  expect(commandLine).not.toContain('--enable-automation');
+  expect(commandLine).toContain(`${path.sep}sapoto-${mcpBrowser}-`);
+
+  await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  });
+  expect(await client.callTool({
+    name: 'browser_evaluate',
+    arguments: { function: '() => navigator.webdriver' },
+  })).toHaveResponse({
+    result: `false`,
+  });
+
+  const profilesDir = testInfo.outputPath('ms-playwright');
+  const profileDir = (await fs.promises.readdir(profilesDir)).find(entry => entry.startsWith('sapoto-chrome-'));
+  expect(profileDir).toBeTruthy();
+  const profileFiles = await fs.promises.readdir(path.join(profilesDir, profileDir!));
+  expect(profileFiles.length).toBeGreaterThan(0);
+});
+
+test('Sapoto runtime persists localStorage across launches of the same profile', async ({ startClient, mcpBrowser, server }, testInfo) => {
+  test.skip(!['chrome', 'chromium', 'msedge'].includes(mcpBrowser!), 'Sapoto runtime is Chromium-specific');
+
+  const config = {
+    browser: {
+      sapotoRuntime: true,
+    },
+  };
+
+  const first = await startClient({ config });
+  await first.client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  });
+  await first.client.callTool({
+    name: 'browser_evaluate',
+    arguments: { function: '() => localStorage.setItem("sapoto-profile-proof", "persisted")' },
+  });
+  await first.client.close();
+
+  const second = await startClient({ config });
+  await second.client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  });
+  expect(await second.client.callTool({
+    name: 'browser_evaluate',
+    arguments: { function: '() => localStorage.getItem("sapoto-profile-proof")' },
+  })).toHaveResponse({
+    result: `"persisted"`,
+  });
+});
+
+test('Sapoto runtime honors seeded Chrome download preferences', async ({ startClient, mcpBrowser, server }, testInfo) => {
+  test.skip(!['chrome', 'chromium', 'msedge'].includes(mcpBrowser!), 'Sapoto runtime is Chromium-specific');
+
+  server.setRoute('/sapoto-download', (req, res) => {
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename=sapoto-download.txt');
+    res.end('sapoto download');
+  });
+  const profilesDir = testInfo.outputPath('ms-playwright');
+  const { client } = await startClient({
+    config: {
+      browser: {
+        sapotoRuntime: true,
+      },
+    },
+  });
+  await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX + '/sapoto-download' },
+  });
+
+  await expect.poll(async () => await findFile(profilesDir, 'sapoto-download.txt')).not.toBe(null);
+  const downloadPath = await findFile(profilesDir, 'sapoto-download.txt');
+  expect(await fs.promises.readFile(downloadPath!, 'utf8')).toBe('sapoto download');
+});
+
+test('Sapoto runtime hides runtime diagnostics from the public MCP tool list by default', async ({ startClient, mcpBrowser }) => {
+  test.skip(!['chrome', 'chromium', 'msedge'].includes(mcpBrowser!), 'Sapoto runtime is Chromium-specific');
+
+  const { client } = await startClient({
+    config: {
+      browser: {
+        sapotoRuntime: true,
+      },
+    },
+  });
+
+  const { tools } = await client.listTools();
+  const toolNames = tools.map(tool => tool.name);
+  expect(toolNames).not.toContain('browser_run_code_unsafe');
+  expect(toolNames).not.toContain('browser_console_messages');
+  expect(toolNames).toContain('browser_navigate');
+  expect(toolNames).toContain('browser_snapshot');
+});
+
+async function findFile(dir: string, fileName: string): Promise<string | null> {
+  const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isFile() && entry.name === fileName)
+      return entryPath;
+    if (entry.isDirectory()) {
+      const result = await findFile(entryPath, fileName);
+      if (result)
+        return result;
+    }
+  }
+  return null;
+}
 
 test('browser_get_config returns merged config from file, env and cli', async ({ startClient }) => {
   const { client } = await startClient({
