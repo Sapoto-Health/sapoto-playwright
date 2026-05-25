@@ -36,6 +36,7 @@ import type * as channels from '@protocol/channels';
 import type { ChildProcess } from 'child_process';
 import type { Language } from '@isomorphic/locatorGenerators';
 import type { Progress } from './progress';
+import type { CdpStealthFeature } from './cdpStealth';
 import type * as playwright from '../..';
 
 export interface BrowserProcess {
@@ -65,6 +66,7 @@ export type BrowserOptions = {
   originalLaunchOptions: types.LaunchOptions;
   userDataDir?: string;
   noDefaults?: boolean;
+  cdpStealth: Set<CdpStealthFeature>;
 };
 
 export abstract class Browser extends SdkObject {

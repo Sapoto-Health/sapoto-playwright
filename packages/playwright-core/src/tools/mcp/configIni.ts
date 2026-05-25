@@ -114,6 +114,7 @@ const longhandTypes: Record<string, LonghandType> = {
 
   // browser.launchOptions
   'browser.launchOptions.channel': 'string',
+  'browser.launchOptions.cdpStealth': 'string[]',
   'browser.launchOptions.headless': 'boolean',
   'browser.launchOptions.executablePath': 'string',
   'browser.launchOptions.chromiumSandbox': 'boolean',

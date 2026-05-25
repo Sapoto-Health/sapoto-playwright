@@ -16,6 +16,13 @@
 
 import type * as playwright from '../../..';
 
+type SapotoLaunchOptions = playwright.LaunchOptions & {
+  /**
+   * CDP stealth features to apply when launching or attaching to Chromium.
+   */
+  cdpStealth?: string[];
+};
+
 export type ToolCapability =
   'config' |
   'core' |
@@ -104,7 +111,7 @@ export type Config = {
      *
      * This is useful for settings options like `channel`, `headless`, `executablePath`, etc.
      */
-    launchOptions?: playwright.LaunchOptions;
+    launchOptions?: SapotoLaunchOptions;
 
     /**
      * Context options for the browser context.

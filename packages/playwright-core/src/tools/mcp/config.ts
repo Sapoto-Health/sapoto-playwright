@@ -19,6 +19,7 @@ import path from 'path';
 import os from 'os';
 
 import dotenv from 'dotenv';
+import { CDP_STEALTH_CLI_FEATURES, parseCdpStealthCLI } from '@isomorphic/cdpStealthCLIParser';
 import { isSystemDirectory } from '@utils/fileUtils';
 import { playwright } from '../../inprocess';
 import { configFromIniFile } from './configIni';
@@ -46,6 +47,7 @@ export type CLIOptions = {
   caps?: string[];
   cdpEndpoint?: string;
   cdpHeader?: Record<string, string>;
+  cdpStealth?: string[];
   cdpTimeout?: number;
   codegen?: 'typescript' | 'none';
   config?: string;
@@ -95,6 +97,10 @@ const defaultConfig: MergedConfig = {
 
 type BrowserUserConfig = NonNullable<Config['browser']>;
 
+type SapotoLaunchOptions = playwrightTypes.LaunchOptions & {
+  cdpStealth?: string[];
+};
+
 export type MergedConfig = Config & {
   browser: BrowserUserConfig & {
     launchOptions: NonNullable<BrowserUserConfig['launchOptions']>;
@@ -112,6 +118,7 @@ export type FullConfig = MergedConfig & {
 
 export async function resolveConfig(config: Config): Promise<FullConfig> {
   const merged = mergeConfig(defaultConfig, config);
+  applyDefaultCdpStealth(merged);
   validateSapotoRuntimeScope(merged);
   const browser = await validateBrowserConfig(merged.browser);
   return { ...merged, browser };
@@ -129,6 +136,8 @@ export async function resolveCLIConfigForMCP(cliOptions: CLIOptions, env?: NodeJ
   result = mergeConfig(result, resolveConfigPaths(envOverrides, process.cwd()));
   result = mergeConfig(result, resolveConfigPaths(cliOverrides, process.cwd()));
 
+  applyDefaultCdpStealth(result);
+
   validateSapotoRuntimeScope(result);
   const browser = await validateBrowserConfig(result.browser);
   if (browser.launchOptions.headless === undefined)
@@ -144,6 +153,12 @@ function validateOutputDir(outputDir: string | undefined) {
     return;
   if (isSystemDirectory(outputDir))
     throw new Error(`--output-dir cannot point to a system directory: ${path.resolve(outputDir)}.`);
+}
+
+function applyDefaultCdpStealth(config: MergedConfig) {
+  const launchOptions = config.browser.launchOptions as SapotoLaunchOptions;
+  if (launchOptions.cdpStealth === undefined)
+    launchOptions.cdpStealth = [...CDP_STEALTH_CLI_FEATURES];
 }
 
 export async function resolveCLIConfigForCLI(daemonProfilesDir: string, sessionName: string, options: any, env?: NodeJS.ProcessEnv): Promise<FullConfig> {
@@ -180,6 +195,7 @@ export async function resolveCLIConfigForCLI(daemonProfilesDir: string, sessionN
   result = mergeConfig(result, resolveConfigPaths(configInFile, configDir));
   result = mergeConfig(result, resolveConfigPaths(envOverrides, process.cwd()));
   result = mergeConfig(result, resolveConfigPaths(daemonOverrides, process.cwd()));
+  applyDefaultCdpStealth(result);
 
   if (result.browser.isolated === undefined)
     result.browser.isolated = !options.profile && !options.persistent && !result.browser.userDataDir && !result.browser.remoteEndpoint && !result.browser.cdpEndpoint && !result.extension;
@@ -301,11 +317,13 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
   const { browserName, channel } = resolveBrowserParam(cliOptions.browser);
 
   // Launch options
-  const launchOptions: playwrightTypes.LaunchOptions = {
+  const launchOptions: SapotoLaunchOptions = {
     channel,
     executablePath: cliOptions.executablePath,
     headless: cliOptions.headless,
   };
+  if (cliOptions.cdpStealth !== undefined)
+    launchOptions.cdpStealth = cliOptions.cdpStealth;
 
   // --sandbox was passed, enable the sandbox
   // --no-sandbox was passed, disable the sandbox
@@ -405,6 +423,7 @@ export function configFromEnv(env?: NodeJS.ProcessEnv): Config & { configFile?: 
   options.caps = commaSeparatedList(e.PLAYWRIGHT_MCP_CAPS);
   options.cdpEndpoint = envToString(e.PLAYWRIGHT_MCP_CDP_ENDPOINT);
   options.cdpHeader = headerParser(envToString(e.PLAYWRIGHT_MCP_CDP_HEADERS));
+  options.cdpStealth = parseCdpStealthCLI(envToString(e.PLAYWRIGHT_MCP_CDP_STEALTH));
   options.cdpTimeout = numberParser(e.PLAYWRIGHT_MCP_CDP_TIMEOUT);
   options.config = envToString(e.PLAYWRIGHT_MCP_CONFIG);
   if (e.PLAYWRIGHT_MCP_CONSOLE_LEVEL)

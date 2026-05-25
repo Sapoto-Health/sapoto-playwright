@@ -363,6 +363,7 @@ export class AndroidDevice extends SdkObject {
         protocolLogger: helper.debugProtocolLogger(),
         browserLogsCollector: new RecentLogsCollector(),
         originalLaunchOptions: {},
+        cdpStealth: new Set(),
       };
       validateBrowserContextOptions(options, browserOptions);
 

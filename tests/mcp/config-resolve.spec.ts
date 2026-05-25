@@ -103,6 +103,16 @@ test.describe('browserName and channel', () => {
 });
 
 test.describe('Sapoto Chrome runtime', () => {
+  test('defaults CDP stealth to all features for MCP sessions', async () => {
+    const config = await resolveCLIConfigForMCP({}, emptyEnv);
+    expect(config.browser.launchOptions.cdpStealth).toEqual(['runtime-cycle', 'log-skip', 'worker-runtime']);
+  });
+
+  test('allows CDP stealth to be explicitly disabled', async () => {
+    const config = await resolveCLIConfigForMCP({ cdpStealth: [] }, emptyEnv);
+    expect(config.browser.launchOptions.cdpStealth).toEqual([]);
+  });
+
   test('keeps config resolution side-effect free while setting strict defaults', async ({}, testInfo) => {
     const configFile = testInfo.outputPath('config.json');
     await fs.promises.writeFile(configFile, JSON.stringify({

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { Worker } from '../page';
+import { applyWorkerStealth } from './cdpStealthGates';
 import { createHandle, CRExecutionContext } from './crExecutionContext';
 import { CRNetworkManager } from './crNetworkManager';
 import { BrowserContext } from '../browserContext';
@@ -64,8 +65,10 @@ export class CRServiceWorker extends Worker {
       this.browserContext.emit(BrowserContext.Events.Console, message);
     });
 
-    session.send('Runtime.enable', {}).catch(e => {});
-    session.send('Runtime.runIfWaitingForDebugger').catch(e => {});
+    applyWorkerStealth({
+      send: (method, params) => session.send(method as any, params),
+      sendMayFail: (method, params) => session._sendMayFail(method as any, params),
+    }, this.browserContext._browser.options.cdpStealth);
     session.on('Inspector.targetReloadedAfterCrash', () => {
       // Resume service worker after restart.
       session._sendMayFail('Runtime.runIfWaitingForDebugger', {});

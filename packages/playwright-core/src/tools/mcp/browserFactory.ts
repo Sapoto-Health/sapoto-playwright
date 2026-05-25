@@ -106,11 +106,15 @@ async function createIsolatedBrowser(config: FullConfig, clientInfo: ClientInfo)
 async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Promise<playwrightTypes.Browser> {
   testDebug('create browser (cdp)');
   const artifactsDir = await computeTracesDir(config, clientInfo);
+  const launchOptions = config.browser.launchOptions as playwrightTypes.LaunchOptions & {
+    cdpStealth?: string[],
+  };
   const browser = await playwright.chromium.connectOverCDP(config.browser.cdpEndpoint!, {
     headers: config.browser.cdpHeaders,
     timeout: config.browser.cdpTimeout,
     artifactsDir,
-  });
+    cdpStealth: launchOptions.cdpStealth,
+  } as playwrightTypes.ConnectOverCDPOptions & { cdpStealth?: string[] });
   return browser;
 }
 

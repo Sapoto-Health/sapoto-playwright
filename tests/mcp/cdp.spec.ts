@@ -15,7 +15,17 @@
  */
 
 import { spawnSync } from 'child_process';
-import { test, expect, mcpServerPath } from './fixtures';
+import { test, expect, mcpServerPath, parseResponse } from './fixtures';
+
+function snapshotFrom(response: ReturnType<typeof parseResponse>): string | undefined {
+  return response?.inlineSnapshot ?? response?.snapshot;
+}
+
+function refFor(snapshot: string | undefined, name: string): string {
+  const match = snapshot?.match(new RegExp(`"${name}"[^\\n]*\\[ref=([^\\]]+)\\]`));
+  expect(match, `Missing ref for "${name}" in snapshot:\n${snapshot}`).toBeTruthy();
+  return match![1];
+}
 
 test.describe.configure({
   retries: 1,
@@ -57,6 +67,69 @@ test('cdp server reuse tab', async ({ cdpServer, startClient, server }) => {
 - Page Title: Title`,
     inlineSnapshot: `- generic [active] [ref=e1]: Hello, world!`,
   });
+});
+
+test('Sapoto-owned Chrome smoke reuses prelaunched portal tab over CDP', async ({ cdpServer, startClient, server }) => {
+  const browserContext = await cdpServer.start();
+
+  server.setContent('/sapoto-owned-portal', `
+    <!DOCTYPE html>
+    <html>
+      <head><title>Sapoto Mock Portal</title></head>
+      <body>
+        <main>
+          <h1>Browser Navigate Snapshot</h1>
+          <p id="status">host-owned chrome ready</p>
+          <label>Member ID <input id="member" oninput="document.querySelector('#status').textContent = 'member:' + this.value"></label>
+          <button onclick="document.querySelector('#status').textContent = 'agent accepted handoff'">Continue</button>
+        </main>
+      </body>
+    </html>
+  `, 'text/html');
+
+  const [page] = browserContext.pages();
+  await page.goto(server.PREFIX + '/sapoto-owned-portal');
+  await page.evaluate(() => localStorage.setItem('sapoto-owner', 'automatic-document-fetcher'));
+  expect(browserContext.pages()).toHaveLength(1);
+
+  const { client } = await startClient({ args: [`--cdp-endpoint=${cdpServer.endpoint}`] });
+
+  const initial = parseResponse(await client.callTool({ name: 'browser_snapshot' }));
+  const initialSnapshot = snapshotFrom(initial);
+  expect(initial?.page).toContain(`Page Title: Sapoto Mock Portal`);
+  expect(initialSnapshot).toContain('heading "Browser Navigate Snapshot"');
+  expect(initialSnapshot).toContain('host-owned chrome ready');
+
+  await client.callTool({
+    name: 'browser_type',
+    arguments: {
+      element: 'Member ID textbox',
+      target: refFor(initialSnapshot, 'Member ID'),
+      text: 'sapoto',
+    },
+  });
+
+  const afterType = parseResponse(await client.callTool({ name: 'browser_snapshot' }));
+  const afterTypeSnapshot = snapshotFrom(afterType);
+  expect(afterTypeSnapshot).toContain('member:sapoto');
+
+  await client.callTool({
+    name: 'browser_click',
+    arguments: {
+      element: 'Continue button',
+      target: refFor(afterTypeSnapshot, 'Continue'),
+    },
+  });
+
+  const finalState = parseResponse(await client.callTool({
+    name: 'browser_evaluate',
+    arguments: { function: '() => ({ status: document.querySelector("#status").textContent, owner: localStorage.getItem("sapoto-owner") })' },
+  }));
+  expect(JSON.parse(finalState?.result || '{}')).toEqual({
+    status: 'agent accepted handoff',
+    owner: 'automatic-document-fetcher',
+  });
+  expect(browserContext.pages()).toHaveLength(1);
 });
 
 test('should throw connection error and allow re-connecting', async ({ cdpServer, startClient, server }) => {

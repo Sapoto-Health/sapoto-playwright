@@ -131,6 +131,7 @@ export abstract class BrowserType extends SdkObject {
         wsEndpoint,
         originalLaunchOptions: options,
         userDataDir: persistent ? userDataDir : undefined,
+        cdpStealth: new Set(),
       };
       if (persistent)
         validateBrowserContextOptions(persistent, browserOptions);
