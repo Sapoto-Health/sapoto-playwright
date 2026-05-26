@@ -607,6 +607,7 @@ ${section}
     const section = buildFocusShimSection({
       suppressFocus: options.suppressFocus,
       backgroundOpenCapture: options.backgroundOpenCapture,
+      printCapture: options.printCapture,
     });
     if (section) {
       sections.push(`
