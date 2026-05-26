@@ -309,7 +309,7 @@ export function buildPrintCaptureSection(): string {
 /**
  * Build the focus shim section (window.open focus-steal suppression).
  *
- * C5 — window.open focus-steal shim (Sapoto #1036, refactor #1043, #1044)
+ * C5 -- window.open focus-steal shim (Sapoto #1036, refactor #1043, #1044)
  *
  * Page-level window.open(url, '_blank') routes through Chromium's
  * Browser::AddNewContents -> NativeWidgetMac::Activate ->
@@ -343,53 +343,30 @@ export function buildFocusShimSection(options: { suppressFocus?: boolean; backgr
   if (!suppressFocus && !backgroundOpenCapture)
     return '';
 
-  return `
-    const _markNative = (window).__stealthMarkNative || function(fn) { return fn; };
-
-    // URL-redaction helper — strip query/hash before logging. Session tokens
-    // can leak via query params; redact at the source per Sapoto redaction rules.
-    const _sanitizeUrl = function(href) {
-      if (typeof href !== 'string') return String(href);
-      if (!href) return href;
-      try {
-        const u = new URL(href, location.href);
-        u.search = '';
-        u.hash = '';
-        return u.toString();
-      } catch (_) {
-        const cut = href.search(/[?#]/);
-        return cut === -1 ? href : href.slice(0, cut);
-      }
-    };
-
-    // Entry marker — fires BEFORE any other shim code so absence in logs
-    // unambiguously means C5 didn't even start.
-    try { console.debug('[FocusShim] C5 entry at ' + _sanitizeUrl(location.href) + ' (top=' + (window === window.top) + ')'); } catch (_) {}
-
-    ${backgroundOpenCapture ? `
+  // Build the conditional blocks as separate strings to avoid deeply nested
+  // template-literal ternaries which are hard to read and audit.
+  const downloadRegexBlock = backgroundOpenCapture ? `
     // Download-URL heuristics: file extensions and path segments that strongly
     // correlate with document downloads on financial portals.
     const DOWNLOAD_URL_RE = /\\.(pdf|xlsx?|csv|docx?|zip|tsv|ofx|qfx|qif|7z|rtf)(\\?|#|$)/i;
     const DOWNLOAD_PATH_RE = /\\/(download|statement|statements|export|invoice|invoices|receipt|receipts|PDFStatement|StatementPDF|getstmt|getStmt|stmt)(?:\\/|\\.|$)/i;
-    ` : ''}
+` : '';
 
-    const SELF_TARGET_RE = /^(_self|_parent|_top)$/i;
-
-    ${backgroundOpenCapture ? `
+  const downloadFnBlock = backgroundOpenCapture ? `
     const _urlLooksLikeDownload = function(href) {
       if (!href) return false;
       if (DOWNLOAD_URL_RE.test(href)) return true;
       try {
         const u = new URL(href, location.href);
         if (DOWNLOAD_PATH_RE.test(u.pathname)) return true;
-      } catch (_) { /* unparseable — give up */ }
+      } catch (_) { /* unparseable -- give up */ }
       return false;
     };
 
     // Emit a [FocusShim] background-open marker that Sapoto's main process
     // catches via Runtime.consoleAPICalled and routes to
     // Target.createTarget({background:true}). The hidden target renders the
-    // URL naturally — Layer 1 catches PDFs, Layer 4 catches HTML-auto-print.
+    // URL naturally -- Layer 1 catches PDFs, Layer 4 catches HTML-auto-print.
     //
     // The marker carries the FULL absolute URL (not sanitized) because the
     // query/hash may carry statement IDs or signed auth tokens required for
@@ -398,9 +375,9 @@ export function buildFocusShimSection(options: { suppressFocus?: boolean; backgr
     const _emitBackgroundOpen = function(href) {
       try { console.log('[FocusShim] background-open ' + href); } catch (_) {}
     };
-    ` : ''}
+` : '';
 
-    ${printCapture ? `
+  const printProxyBlock = printCapture ? `
     const _printCaptureProxy = function() {
       let _capturedHtml = '';
       return {
@@ -435,8 +412,66 @@ export function buildFocusShimSection(options: { suppressFocus?: boolean; backgr
         opener: null,
       };
     };
-    ` : ''}
+` : '';
 
+  const emptyUrlHandler = printCapture
+    ? `
+        try { console.debug('[FocusShim] -> print-capture proxy (empty URL)'); } catch (_) {}
+        return _printCaptureProxy();
+`
+    : `
+        try { console.debug('[FocusShim] -> native (empty URL, no print-capture)'); } catch (_) {}
+        return _nativeOpen(url, target, features);
+`;
+
+  const downloadCheckBlock = backgroundOpenCapture ? `
+      // Download-y URL -> emit background-open marker. Sapoto's main process
+      // catches the marker and spawns a hidden CDP target via
+      // Target.createTarget({background:true, browserContextId}).
+      if (_urlLooksLikeDownload(u)) {
+        let absoluteUrl = u;
+        try {
+          absoluteUrl = new URL(u, location.href).href;
+        } catch (_) {
+          // Unparseable URL -- fall through to native so the page sees the
+          // same behavior the unshimmed browser would have produced.
+          try { console.debug('[FocusShim] -> native (invalid URL)'); } catch (_) {}
+          return _nativeOpen(url, target, features);
+        }
+        try { console.debug('[FocusShim] -> background-open url=' + _sanitizeUrl(absoluteUrl)); } catch (_) {}
+        _emitBackgroundOpen(absoluteUrl);
+        return null;
+      }
+` : '';
+
+  return `
+    const _markNative = (window).__stealthMarkNative || function(fn) { return fn; };
+
+    // URL-redaction helper -- strip query/hash before logging. Session tokens
+    // can leak via query params; redact at the source per Sapoto redaction rules.
+    const _sanitizeUrl = function(href) {
+      if (typeof href !== 'string') return String(href);
+      if (!href) return href;
+      try {
+        const u = new URL(href, location.href);
+        u.search = '';
+        u.hash = '';
+        return u.toString();
+      } catch (_) {
+        const cut = href.search(/[?#]/);
+        return cut === -1 ? href : href.slice(0, cut);
+      }
+    };
+
+    // Entry marker -- fires BEFORE any other shim code so absence in logs
+    // unambiguously means C5 didn't even start.
+    try { console.debug('[FocusShim] C5 entry at ' + _sanitizeUrl(location.href) + ' (top=' + (window === window.top) + ')'); } catch (_) {}
+
+${downloadRegexBlock}
+    const SELF_TARGET_RE = /^(_self|_parent|_top)$/i;
+
+${downloadFnBlock}
+${printProxyBlock}
     // Capture the original window.open via getOwnPropertyDescriptor because
     // Chromium ships window.open as an accessor in some builds.
     const _origDesc = Object.getOwnPropertyDescriptor(window, 'open');
@@ -470,7 +505,7 @@ export function buildFocusShimSection(options: { suppressFocus?: boolean; backgr
       if (_isSapotoElectronBridge()) {
         if (!_electronModeNoticed) {
           _electronModeNoticed = true;
-          try { console.debug('[FocusShim] electron mode detected — delegating to native window.open'); } catch (_) {}
+          try { console.debug('[FocusShim] electron mode detected -- delegating to native window.open'); } catch (_) {}
         }
         return _nativeOpen(url, target, features);
       }
@@ -479,7 +514,7 @@ export function buildFocusShimSection(options: { suppressFocus?: boolean; backgr
       // noisy per-call diagnostics out of the captured Supabase warn stream.
       try { console.debug('[FocusShim] window.open called url=' + (u ? _sanitizeUrl(u) : '(empty)') + ' target=' + (t || '(empty)')); } catch (_) {}
 
-      // _self/_parent/_top navigate in current context — never steal focus.
+      // _self/_parent/_top navigate in current context -- never steal focus.
       if (SELF_TARGET_RE.test(t))
         return _nativeOpen(url, target, features);
 
@@ -491,35 +526,10 @@ export function buildFocusShimSection(options: { suppressFocus?: boolean; backgr
           try { console.debug('[FocusShim] -> native (empty URL, named target=' + t + ')'); } catch (_) {}
           return _nativeOpen(url, target, features);
         }
-        ${printCapture ? `
-        try { console.debug('[FocusShim] -> print-capture proxy (empty URL)'); } catch (_) {}
-        return _printCaptureProxy();
-        ` : `
-        try { console.debug('[FocusShim] -> native (empty URL, no print-capture)'); } catch (_) {}
-        return _nativeOpen(url, target, features);
-        `}
+${emptyUrlHandler}
       }
 
-      ${backgroundOpenCapture ? `
-      // Download-y URL -> emit background-open marker. Sapoto's main process
-      // catches the marker and spawns a hidden CDP target via
-      // Target.createTarget({background:true, browserContextId}).
-      if (_urlLooksLikeDownload(u)) {
-        let absoluteUrl = u;
-        try {
-          absoluteUrl = new URL(u, location.href).href;
-        } catch (_) {
-          // Unparseable URL — fall through to native so the page sees the
-          // same behavior the unshimmed browser would have produced.
-          try { console.debug('[FocusShim] -> native (invalid URL)'); } catch (_) {}
-          return _nativeOpen(url, target, features);
-        }
-        try { console.debug('[FocusShim] -> background-open url=' + _sanitizeUrl(absoluteUrl)); } catch (_) {}
-        _emitBackgroundOpen(absoluteUrl);
-        return null;
-      }
-      ` : ''}
-
+${downloadCheckBlock}
       // Other URLs: native. Focus steals but this is rare in portal automation.
       try { console.debug('[FocusShim] -> native (URL did not match download heuristic)'); } catch (_) {}
       return _nativeOpen(url, target, features);
@@ -542,7 +552,7 @@ export function buildFocusShimSection(options: { suppressFocus?: boolean; backgr
       try { (window).open = _shimOpen; } catch (_) { /* really stuck */ }
     }
 
-    // Install marker — fires only if the whole patch installed cleanly.
+    // Install marker -- fires only if the whole patch installed cleanly.
     try { console.debug('[FocusShim] installed at ' + _sanitizeUrl(location.href) + ' (top=' + (window === window.top) + ')'); } catch (_) {}
 `;
 }
