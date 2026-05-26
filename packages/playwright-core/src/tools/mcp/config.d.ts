@@ -291,4 +291,56 @@ export type Config = {
    * Specify the language to use for code generation.
    */
   codegen?: 'typescript' | 'none';
+
+  // ----- Sapoto behavior-control flags -----
+
+  /**
+   * Enable document-print capture.
+   */
+  printCapture?: boolean;
+
+  /**
+   * Enable legacy Chrome API runtime stubs.
+   */
+  chromeRuntimeStubs?: boolean;
+
+  /**
+   * Enable CDP Emulation.setFocusEmulationEnabled.
+   */
+  focusEmulation?: boolean;
+
+  /**
+   * Skip tab focus changes.
+   */
+  suppressFocus?: boolean;
+
+  /**
+   * Enable humanized input timing.
+   */
+  humanizeInput?: boolean;
+
+  /**
+   * Enable background popup/download capture.
+   */
+  backgroundOpenCapture?: boolean;
+
+  /**
+   * Don't close browser on MCP disconnect.
+   */
+  keepBrowserAlive?: boolean;
+
+  /**
+   * Disable file downloads. Defaults to true.
+   */
+  disableDownloads?: boolean;
+
+  /**
+   * Exact MCP tool allow-list. When set, only the named tools are exposed.
+   */
+  allowedTools?: string[];
+
+  /**
+   * Filter internal URLs from snapshots and navigation results.
+   */
+  filterInternalUrls?: boolean;
 };

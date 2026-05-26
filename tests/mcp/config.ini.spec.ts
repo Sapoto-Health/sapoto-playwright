@@ -117,3 +117,34 @@ test('ini config boolean values', async ({ startClient }) => {
   expect(config.browser.contextOptions.bypassCSP).toBe(true);
   expect(config.browser.contextOptions.javaScriptEnabled).toBe(false);
 });
+
+test('ini config sapoto behavior-control flags', async ({ startClient }) => {
+  const { client } = await startClient({
+    config: `
+      capabilities = config
+      printCapture = true
+      chromeRuntimeStubs = false
+      focusEmulation = true
+      suppressFocus = true
+      humanizeInput = true
+      backgroundOpenCapture = true
+      keepBrowserAlive = true
+      disableDownloads = true
+      allowedTools = browser_navigate
+      filterInternalUrls = true
+    `,
+  });
+
+  const result = await client.callTool({ name: 'browser_get_config' });
+  const config = JSON.parse(parseResponse(result).result);
+  expect(config.printCapture).toBe(true);
+  expect(config.chromeRuntimeStubs).toBe(false);
+  expect(config.focusEmulation).toBe(true);
+  expect(config.suppressFocus).toBe(true);
+  expect(config.humanizeInput).toBe(true);
+  expect(config.backgroundOpenCapture).toBe(true);
+  expect(config.keepBrowserAlive).toBe(true);
+  expect(config.disableDownloads).toBe(true);
+  expect(config.allowedTools).toEqual(['browser_navigate']);
+  expect(config.filterInternalUrls).toBe(true);
+});

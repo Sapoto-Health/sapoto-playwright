@@ -595,3 +595,124 @@ test.describe('resolveCLIConfigForCLI - extension', () => {
     expect(config.browser.isolated).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sapoto behavior-control flags
+// ---------------------------------------------------------------------------
+
+test.describe('Sapoto behavior-control flags', () => {
+  test('all flags default to undefined when not set', async () => {
+    const config = await resolveCLIConfigForMCP({}, emptyEnv) as any;
+    expect(config.printCapture).toBeUndefined();
+    expect(config.chromeRuntimeStubs).toBeUndefined();
+    expect(config.focusEmulation).toBeUndefined();
+    expect(config.suppressFocus).toBeUndefined();
+    expect(config.humanizeInput).toBeUndefined();
+    expect(config.backgroundOpenCapture).toBeUndefined();
+    expect(config.keepBrowserAlive).toBeUndefined();
+    expect(config.disableDownloads).toBeUndefined();
+    expect(config.allowedTools).toBeUndefined();
+    expect(config.filterInternalUrls).toBeUndefined();
+  });
+
+  test('boolean flags pass through from CLI options', async () => {
+    const config = await resolveCLIConfigForMCP({
+      printCapture: true,
+      chromeRuntimeStubs: true,
+      focusEmulation: false,
+      suppressFocus: true,
+      humanizeInput: true,
+      backgroundOpenCapture: true,
+      keepBrowserAlive: true,
+      disableDownloads: true,
+      filterInternalUrls: true,
+    }, emptyEnv) as any;
+
+    expect(config.printCapture).toBe(true);
+    expect(config.chromeRuntimeStubs).toBe(true);
+    expect(config.focusEmulation).toBe(false);
+    expect(config.suppressFocus).toBe(true);
+    expect(config.humanizeInput).toBe(true);
+    expect(config.backgroundOpenCapture).toBe(true);
+    expect(config.keepBrowserAlive).toBe(true);
+    expect(config.disableDownloads).toBe(true);
+    expect(config.filterInternalUrls).toBe(true);
+  });
+
+  test('--allowed-tools parses comma-separated list', async () => {
+    const config = await resolveCLIConfigForMCP({
+      allowedTools: ['browser_navigate', 'browser_click', 'browser_snapshot'],
+    }, emptyEnv) as any;
+
+    expect(config.allowedTools).toEqual(['browser_navigate', 'browser_click', 'browser_snapshot']);
+  });
+
+  test('env vars set behavior-control flags', async () => {
+    const config = await resolveCLIConfigForMCP({}, {
+      PLAYWRIGHT_MCP_PRINT_CAPTURE: 'true',
+      PLAYWRIGHT_MCP_CHROME_RUNTIME_STUBS: '1',
+      PLAYWRIGHT_MCP_FOCUS_EMULATION: 'false',
+      PLAYWRIGHT_MCP_SUPPRESS_FOCUS: 'true',
+      PLAYWRIGHT_MCP_HUMANIZE_INPUT: 'true',
+      PLAYWRIGHT_MCP_BACKGROUND_OPEN_CAPTURE: 'true',
+      PLAYWRIGHT_MCP_KEEP_BROWSER_ALIVE: 'true',
+      PLAYWRIGHT_MCP_DISABLE_DOWNLOADS: 'true',
+      PLAYWRIGHT_MCP_ALLOWED_TOOLS: 'browser_navigate,browser_click',
+      PLAYWRIGHT_MCP_FILTER_INTERNAL_URLS: 'true',
+    }) as any;
+
+    expect(config.printCapture).toBe(true);
+    expect(config.chromeRuntimeStubs).toBe(true);
+    expect(config.focusEmulation).toBe(false);
+    expect(config.suppressFocus).toBe(true);
+    expect(config.humanizeInput).toBe(true);
+    expect(config.backgroundOpenCapture).toBe(true);
+    expect(config.keepBrowserAlive).toBe(true);
+    expect(config.disableDownloads).toBe(true);
+    expect(config.allowedTools).toEqual(['browser_navigate', 'browser_click']);
+    expect(config.filterInternalUrls).toBe(true);
+  });
+
+  test('CLI flags override env vars for behavior-control', async () => {
+    const config = await resolveCLIConfigForMCP({
+      printCapture: false,
+      disableDownloads: false,
+    }, {
+      PLAYWRIGHT_MCP_PRINT_CAPTURE: 'true',
+      PLAYWRIGHT_MCP_DISABLE_DOWNLOADS: 'true',
+    }) as any;
+
+    expect(config.printCapture).toBe(false);
+    expect(config.disableDownloads).toBe(false);
+  });
+
+  test('config file behavior-control flags preserved when CLI does not override', async ({}, testInfo) => {
+    const configFile = testInfo.outputPath('config.json');
+    await fs.promises.writeFile(configFile, JSON.stringify({
+      printCapture: true,
+      keepBrowserAlive: true,
+      allowedTools: ['browser_navigate'],
+      disableDownloads: true,
+    }));
+    const config = await resolveCLIConfigForMCP({ config: configFile }, emptyEnv) as any;
+    expect(config.printCapture).toBe(true);
+    expect(config.keepBrowserAlive).toBe(true);
+    expect(config.allowedTools).toEqual(['browser_navigate']);
+    expect(config.disableDownloads).toBe(true);
+  });
+
+  test('CLI overrides config file behavior-control flags', async ({}, testInfo) => {
+    const configFile = testInfo.outputPath('config.json');
+    await fs.promises.writeFile(configFile, JSON.stringify({
+      printCapture: true,
+      disableDownloads: true,
+    }));
+    const config = await resolveCLIConfigForMCP({
+      config: configFile,
+      printCapture: false,
+      disableDownloads: false,
+    }, emptyEnv) as any;
+    expect(config.printCapture).toBe(false);
+    expect(config.disableDownloads).toBe(false);
+  });
+});

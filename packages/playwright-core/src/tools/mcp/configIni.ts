@@ -194,4 +194,16 @@ const longhandTypes: Record<string, LonghandType> = {
 
   // snapshot
   'snapshot.mode': 'string',
+
+  // Sapoto behavior-control flags
+  'printCapture': 'boolean',
+  'chromeRuntimeStubs': 'boolean',
+  'focusEmulation': 'boolean',
+  'suppressFocus': 'boolean',
+  'humanizeInput': 'boolean',
+  'backgroundOpenCapture': 'boolean',
+  'keepBrowserAlive': 'boolean',
+  'disableDownloads': 'boolean',
+  'allowedTools': 'string[]',
+  'filterInternalUrls': 'boolean',
 };
