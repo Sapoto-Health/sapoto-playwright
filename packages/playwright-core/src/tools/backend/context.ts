@@ -26,6 +26,7 @@ import { isPathInside, isSystemDirectory, isWritable } from '@utils/fileUtils';
 import { playwright } from '../../inprocess';
 
 import { Tab } from './tab';
+import { buildStealthInitScript } from './stealthInitScript';
 
 import type * as playwrightTypes from '../../..';
 import type { SessionLog } from './sessionLog';
@@ -358,6 +359,16 @@ export class Context {
     }
     for (const initScript of this.config.browser?.initScript || [])
       this._disposables.push(await browserContext.addInitScript({ path: path.resolve(this.options.cwd, initScript) }));
+
+    // Sapoto stealth init script — composed from behavior-control flags.
+    const stealthScript = buildStealthInitScript({
+      chromeRuntimeStubs: this.config.chromeRuntimeStubs,
+      printCapture: this.config.printCapture,
+      suppressFocus: this.config.suppressFocus,
+      backgroundOpenCapture: this.config.backgroundOpenCapture,
+    });
+    if (stealthScript)
+      this._disposables.push(await browserContext.addInitScript({ content: stealthScript }));
 
     for (const page of browserContext.pages())
       this._onPageCreated(page);

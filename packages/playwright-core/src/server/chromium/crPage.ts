@@ -48,65 +48,9 @@ import type * as types from '../types';
 import type * as channels from '@protocol/channels';
 
 
-// Sapoto behavior-control init scripts injected via Page.addScriptToEvaluateOnNewDocument.
-// These run in the main world before any page script.
-
-/**
- * printCapture: override window.print() to emit a custom event that the host
- * can intercept via CDP Runtime.evaluate, instead of showing the native print
- * dialog. The host calls Page.printToPDF directly when it detects the event.
- */
-const sapotoPrintCaptureScript = `(() => {
-  const origPrint = window.print.bind(window);
-  Object.defineProperty(window, 'print', {
-    configurable: true,
-    writable: true,
-    value: function sapotoPrintCapture() {
-      window.dispatchEvent(new CustomEvent('__sapotoPrintRequest'));
-      // Do NOT call origPrint() — the host owns the print flow.
-    }
-  });
-})();`;
-
-/**
- * chromeRuntimeStubs: stub the legacy Chrome timing APIs that some sites
- * probe for to detect automation. Only stubs chrome.csi and chrome.loadTimes
- * (the harmless presence-check APIs), NOT chrome.runtime which would break
- * extensions.
- */
-const sapotoChromeRuntimeStubsScript = `(() => {
-  if (typeof window.chrome === 'undefined')
-    window.chrome = {};
-  if (!window.chrome.csi) {
-    window.chrome.csi = function() {
-      return {
-        startE: Date.now(),
-        onloadT: Date.now(),
-        pageT: performance.now(),
-        tran: 15
-      };
-    };
-  }
-  if (!window.chrome.loadTimes) {
-    window.chrome.loadTimes = function() {
-      return {
-        commitLoadTime: Date.now() / 1000,
-        connectionInfo: 'http/1.1',
-        finishDocumentLoadTime: Date.now() / 1000,
-        finishLoadTime: Date.now() / 1000,
-        firstPaintAfterLoadTime: 0,
-        firstPaintTime: Date.now() / 1000,
-        navigationType: 'Other',
-        npnNegotiatedProtocol: 'http/1.1',
-        requestTime: Date.now() / 1000,
-        startLoadTime: Date.now() / 1000,
-        wasAlternateProtocolAvailable: false,
-        wasFetchedViaSpdy: false,
-        wasNpnNegotiated: false
-      };
-    };
-  }
-})();`;
+// Sapoto behavior-control init scripts have been moved to the stealth init-script
+// builder in packages/playwright-core/src/tools/backend/stealthInitScript.ts.
+// The builder is wired in context.ts via BrowserContext.addInitScript.
 
 export type WindowBounds = { top?: number, left?: number, width?: number, height?: number };
 
@@ -580,7 +524,7 @@ class FrameSession {
           this._crPage._browserContext === this._crPage._browserContext._browser._defaultContext;
       if (this._crPage._browserContext.needsPlaywrightBinding())
         promises.push(this.exposePlaywrightBinding());
-      if (this._isMainFrame() && !skipDefaultOverrides && this._crPage._browserContext._browser.options.focusEmulation)
+      if (this._isMainFrame() && !skipDefaultOverrides && this._crPage._browserContext._browser.options.focusEmulation === true)
         promises.push(this._client.send('Emulation.setFocusEmulationEnabled', { enabled: true }));
       const options = this._crPage._browserContext._options;
       if (options.bypassCSP)
@@ -607,12 +551,8 @@ class FrameSession {
       promises.push(this._updateFileChooserInterception(true));
       for (const initScript of this._crPage._page.allInitScripts())
         promises.push(this._evaluateOnNewDocument(initScript, 'main', true /* runImmediately */));
-      // Sapoto behavior-control init scripts.
-      const browserOptions = this._crPage._browserContext._browser.options;
-      if (browserOptions.printCapture)
-        promises.push(this._client.send('Page.addScriptToEvaluateOnNewDocument', { source: sapotoPrintCaptureScript, runImmediately: true }));
-      if (browserOptions.chromeRuntimeStubs)
-        promises.push(this._client.send('Page.addScriptToEvaluateOnNewDocument', { source: sapotoChromeRuntimeStubsScript, runImmediately: true }));
+      // Sapoto behavior-control init scripts are now injected via the stealth
+      // init-script builder in context.ts (BrowserContext.addInitScript).
     }
     promises.push(this._client.send('Runtime.runIfWaitingForDebugger'));
     promises.push(this._firstNonInitialNavigationCommittedPromise);
