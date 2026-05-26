@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// Allowed subfeatures. `network-skip` (suppressing Network.enable / Fetch.enable)
+// is intentionally excluded: ADF depends on request interception, response capture,
+// and download behavior — all of which require those CDP domains active. Skipping
+// them would break core document-fetching functionality. See PRD #1120.
 export const CDP_STEALTH_CLI_FEATURES: ReadonlyArray<string> = Object.freeze([
   'runtime-cycle',
   'log-skip',
