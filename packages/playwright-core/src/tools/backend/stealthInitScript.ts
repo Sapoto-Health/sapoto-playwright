@@ -142,24 +142,130 @@ export function buildChromeStubsSection(): string {
 }
 
 /**
- * Build the print capture section.
+ * Build the print capture section (C3/C4 from old fork).
  *
- * Minimal override carried forward from the previous crPage.ts inline script.
- * Overrides window.print() to dispatch a custom event that the host intercepts
- * via CDP Runtime.evaluate. A subsequent tracer will replace this with the
- * full deferred-print + Path D srcdoc-iframe bridge from the old fork.
+ * Overrides window.print() to:
+ *   1. Emit a `[Print Capture] window.print() intercepted at <url>` console
+ *      marker — the primary signal for Chrome mode (caught via
+ *      Runtime.consoleAPICalled on the CDP side).
+ *   2. Walk up to 8 parent frames looking for `electronAPI.requestPrintCapture`
+ *      — the primary signal for Electron mode (preload bridge).
+ *   3. Compute a precise `frameSelector` for iframe-scoped prints using
+ *      `SAFE_ID` and `SAFE_DATA_VALUE` regex guards so the main process can
+ *      target its insertCSS rule correctly.
+ *
+ * Both console marker and electronAPI bridge coexist — Chrome mode uses the
+ * marker, Electron mode uses the bridge, and nothing breaks if both fire.
+ *
+ * The old fork's C3 section had a 2-second `setTimeout` deferred wait to give
+ * the Electron preload time to install its real `window.print` override. That
+ * timer is removed here: `addScriptToEvaluateOnNewDocument` with
+ * `runImmediately: true` runs before any page script, so the init-script IS
+ * the first override installed — no deferred waiting needed.
+ *
+ * The override is masked via `__stealthMarkNative` (installed by the toString
+ * infrastructure section) so `window.print.toString()` returns native shape.
+ *
+ * Debounce: rapid-fire `window.print()` calls within 1 second are collapsed
+ * to a single capture event (mirrors the old fork's C4 pattern).
  */
 export function buildPrintCaptureSection(): string {
   return `
-    const origPrint = window.print.bind(window);
-    Object.defineProperty(window, 'print', {
-      configurable: true,
-      writable: true,
-      value: function sapotoPrintCapture() {
-        window.dispatchEvent(new CustomEvent('__sapotoPrintRequest'));
-        // Do NOT call origPrint() — the host owns the print flow.
+    // Helper: redact query string + hash from URL before logging/shipping.
+    // window.location.href can carry session tokens in the query string.
+    const _sanitizeUrl = function(href) {
+      if (typeof href !== 'string') return String(href);
+      if (!href) return href;
+      try {
+        const u = new URL(href, location.href);
+        u.search = '';
+        u.hash = '';
+        return u.toString();
+      } catch (_) {
+        const cut = href.search(/[?#]/);
+        return cut === -1 ? href : href.slice(0, cut);
       }
-    });
+    };
+
+    const _markNative = (window).__stealthMarkNative || function(fn) { return fn; };
+    let _lastPrintTime = 0;
+
+    window.print = _markNative(function print() {
+      // Debounce: collapse rapid-fire calls within 1 second.
+      const _now = Date.now();
+      if (_now - _lastPrintTime < 1000) return;
+      _lastPrintTime = _now;
+
+      // Primary signal for Chrome mode — caught by Runtime.consoleAPICalled.
+      try { console.log('[Print Capture] window.print() intercepted at ' + _sanitizeUrl(window.location.href)); } catch (_) {}
+
+      // Bridge walk: traverse up to 8 parent windows looking for
+      // electronAPI.requestPrintCapture (Electron mode primary signal).
+      let w = window;
+      for (let hops = 0; hops < 8 && w; hops += 1) {
+        try {
+          const api = (w).electronAPI;
+          if (api && typeof api.requestPrintCapture === 'function') {
+            // Compute frameSelector for iframe-scoped print targeting.
+            // PRE-FILTER: the main-process regex accepts ids matching
+            // /^[A-Za-z][A-Za-z0-9_\\-]*$/ and data attribute values matching
+            // /^[A-Za-z0-9_\\-:.]+$/ ONLY. CSS.escape() emits backslash
+            // escapes for unsafe ids — skip the selector when the id can't
+            // be emitted safely.
+            let frameSelector = null;
+            try {
+              const SAFE_ID = /^[A-Za-z][A-Za-z0-9_\\-]*$/;
+              const SAFE_DATA_VALUE = /^[A-Za-z0-9_\\-:.]+$/;
+              const el = window.frameElement;
+              if (el) {
+                if (el.id && SAFE_ID.test(el.id)) {
+                  frameSelector = 'iframe#' + el.id;
+                } else if (el.id) {
+                  try { console.warn('[Print Capture] iframe id needs CSS.escape (' + JSON.stringify(el.id) + ') — checking data-print-id fallback'); } catch (_) {}
+                }
+                if (!frameSelector) {
+                  const dataPrintId = el.getAttribute('data-print-id');
+                  if (dataPrintId) {
+                    if (SAFE_DATA_VALUE.test(dataPrintId)) {
+                      frameSelector = 'iframe[data-print-id="' + dataPrintId + '"]';
+                    } else {
+                      try { console.warn('[Print Capture] iframe data-print-id needs escaping (' + JSON.stringify(dataPrintId) + ') — falling back to iframe[srcdoc]'); } catch (_) {}
+                    }
+                  }
+                }
+              }
+            } catch (_) { /* cross-origin frameElement read — fall back to null */ }
+
+            api.requestPrintCapture({
+              url: _sanitizeUrl(window.location.href),
+              title: document.title,
+              timestamp: Date.now(),
+              scope: window === window.top ? 'top' : 'iframe',
+              frameSelector,
+            });
+            return;
+          }
+        } catch (_) {
+          // Cross-origin access on w.electronAPI threw. Stop the bridge walk.
+          break;
+        }
+        // w === w.parent at the top frame. Comparison itself can throw
+        // cross-origin in some engines, so wrap it.
+        try {
+          if (w === w.parent) break;
+          w = w.parent;
+        } catch (_) {
+          break;
+        }
+      }
+
+      // Top-frame prints without electronAPI fall through silently —
+      // the console marker above already fired and is the primary signal
+      // in Chrome mode.
+      if (window !== window.top) {
+        try { console.error('[Print Capture] bridge unreachable at ' + _sanitizeUrl(window.location.href)); } catch (_) {}
+      }
+    }, 'print');
 `;
 }
 
