@@ -145,6 +145,11 @@ export function decorateMCPCommand(command: Command) {
             if (sharedBrowserPromise && clientCount > 0)
               return;
 
+            if (config.keepBrowserAlive) {
+              testDebug('keep browser alive (keepBrowserAlive=true)');
+              return;
+            }
+
             testDebug('close browser');
             sharedBrowserPromise = undefined;
             const browserContext = (backend as BrowserBackend).browserContext;

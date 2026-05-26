@@ -17,6 +17,7 @@
 import * as z from 'zod';
 import { defineTabTool } from './tool';
 import { elementSchema } from './snapshot';
+import { humanizeTypingDelay } from './utils';
 
 const press = defineTabTool({
   capability: 'core-input',
@@ -63,7 +64,8 @@ const pressSequentially = defineTabTool({
   handle: async (tab, params, response) => {
     response.addCode(`// Press ${params.text}`);
     response.addCode(`await page.keyboard.type('${params.text}');`);
-    await tab.page.keyboard.type(params.text);
+    const delay = humanizeTypingDelay(tab.context.config.humanizeInput);
+    await tab.page.keyboard.type(params.text, delay ? { delay } : undefined);
     if (params.submit) {
       response.addCode(`await page.keyboard.press('Enter');`);
       response.setIncludeSnapshot();
@@ -98,7 +100,8 @@ const type = defineTabTool({
       if (params.slowly) {
         response.setIncludeSnapshot();
         response.addCode(`await page.${resolved}.pressSequentially(${secret.code});`);
-        await locator.pressSequentially(secret.value, tab.actionTimeoutOptions);
+        const delay = humanizeTypingDelay(tab.context.config.humanizeInput);
+        await locator.pressSequentially(secret.value, { ...tab.actionTimeoutOptions, ...(delay ? { delay } : {}) });
       } else {
         response.addCode(`await page.${resolved}.fill(${secret.code});`);
         await locator.fill(secret.value, tab.actionTimeoutOptions);

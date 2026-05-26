@@ -351,8 +351,12 @@ export class CRBrowserContext extends BrowserContext<CREventsMap> {
     assert(!Array.from(this._browser._crPages.values()).some(page => page._browserContext === this));
     const promises: Promise<any>[] = [super.initialize()];
     if (this._browser.options.name !== 'clank' && this._options.acceptDownloads !== 'internal-browser-default') {
+      // When disableDownloads is set, force deny behavior regardless of acceptDownloads setting.
+      const behavior = this._browser.options.disableDownloads
+        ? 'deny'
+        : (this._options.acceptDownloads === 'accept' ? 'allowAndName' : 'deny');
       promises.push(this._browser._session.send('Browser.setDownloadBehavior', {
-        behavior: this._options.acceptDownloads === 'accept' ? 'allowAndName' : 'deny',
+        behavior,
         browserContextId: this._browserContextId,
         downloadPath: this._browser.options.downloadsPath,
         eventsEnabled: true,
