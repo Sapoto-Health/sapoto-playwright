@@ -715,4 +715,162 @@ test.describe('Sapoto behavior-control flags', () => {
     expect(config.printCapture).toBe(false);
     expect(config.disableDownloads).toBe(false);
   });
+
+  test('--allowed-tools with empty array produces empty array', async () => {
+    const config = await resolveCLIConfigForMCP({
+      allowedTools: [],
+    }, emptyEnv) as any;
+    expect(config.allowedTools).toEqual([]);
+  });
+
+  test('--disable-downloads as boolean presence flag', async () => {
+    // Commander parses --disable-downloads as a boolean presence flag (true).
+    const config = await resolveCLIConfigForMCP({
+      disableDownloads: true,
+    }, emptyEnv) as any;
+    expect(config.disableDownloads).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Flag parsing edge cases
+// ---------------------------------------------------------------------------
+
+test.describe('on/off parser via MCP server startup', () => {
+  // The onOffParser is used by Commander for --chrome-runtime-stubs,
+  // --focus-emulation, and --humanize-input. Invalid values cause the server
+  // process to exit immediately with a clear error.
+
+  test('--chrome-runtime-stubs=maybe rejects with clear error', async ({ startClient }) => {
+    const startResult = startClient({
+      args: ['--chrome-runtime-stubs=maybe'],
+    });
+    await expect(startResult).rejects.toThrow();
+  });
+
+  test('--focus-emulation=yes rejects with clear error', async ({ startClient }) => {
+    const startResult = startClient({
+      args: ['--focus-emulation=yes'],
+    });
+    await expect(startResult).rejects.toThrow();
+  });
+
+  test('--humanize-input=true rejects with clear error', async ({ startClient }) => {
+    // "true" is not a valid on/off value — only "on" and "off" are accepted.
+    const startResult = startClient({
+      args: ['--humanize-input=true'],
+    });
+    await expect(startResult).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Config resolution roundtrip — all 10 Sapoto flags survive CLI → config → back
+// ---------------------------------------------------------------------------
+
+test.describe('Sapoto flag roundtrip', () => {
+  test('all 10 behavior-control flags survive CLI → resolvedConfig without data loss', async () => {
+    const config = await resolveCLIConfigForMCP({
+      printCapture: true,
+      chromeRuntimeStubs: true,
+      focusEmulation: true,
+      suppressFocus: true,
+      humanizeInput: true,
+      backgroundOpenCapture: true,
+      keepBrowserAlive: true,
+      disableDownloads: true,
+      allowedTools: ['browser_navigate', 'browser_click'],
+      filterInternalUrls: true,
+    }, emptyEnv) as any;
+
+    expect(config.printCapture).toBe(true);
+    expect(config.chromeRuntimeStubs).toBe(true);
+    expect(config.focusEmulation).toBe(true);
+    expect(config.suppressFocus).toBe(true);
+    expect(config.humanizeInput).toBe(true);
+    expect(config.backgroundOpenCapture).toBe(true);
+    expect(config.keepBrowserAlive).toBe(true);
+    expect(config.disableDownloads).toBe(true);
+    expect(config.allowedTools).toEqual(['browser_navigate', 'browser_click']);
+    expect(config.filterInternalUrls).toBe(true);
+  });
+
+  test('all 10 flags survive config file → resolvedConfig without data loss', async ({}, testInfo) => {
+    const configFile = testInfo.outputPath('config.json');
+    await fs.promises.writeFile(configFile, JSON.stringify({
+      printCapture: true,
+      chromeRuntimeStubs: true,
+      focusEmulation: true,
+      suppressFocus: true,
+      humanizeInput: true,
+      backgroundOpenCapture: true,
+      keepBrowserAlive: true,
+      disableDownloads: true,
+      allowedTools: ['browser_navigate', 'browser_click'],
+      filterInternalUrls: true,
+    }));
+
+    const config = await resolveCLIConfigForMCP({ config: configFile }, emptyEnv) as any;
+
+    expect(config.printCapture).toBe(true);
+    expect(config.chromeRuntimeStubs).toBe(true);
+    expect(config.focusEmulation).toBe(true);
+    expect(config.suppressFocus).toBe(true);
+    expect(config.humanizeInput).toBe(true);
+    expect(config.backgroundOpenCapture).toBe(true);
+    expect(config.keepBrowserAlive).toBe(true);
+    expect(config.disableDownloads).toBe(true);
+    expect(config.allowedTools).toEqual(['browser_navigate', 'browser_click']);
+    expect(config.filterInternalUrls).toBe(true);
+  });
+
+  test('all 10 flags survive env → resolvedConfig without data loss', async () => {
+    const config = await resolveCLIConfigForMCP({}, {
+      PLAYWRIGHT_MCP_PRINT_CAPTURE: 'true',
+      PLAYWRIGHT_MCP_CHROME_RUNTIME_STUBS: 'true',
+      PLAYWRIGHT_MCP_FOCUS_EMULATION: 'true',
+      PLAYWRIGHT_MCP_SUPPRESS_FOCUS: 'true',
+      PLAYWRIGHT_MCP_HUMANIZE_INPUT: 'true',
+      PLAYWRIGHT_MCP_BACKGROUND_OPEN_CAPTURE: 'true',
+      PLAYWRIGHT_MCP_KEEP_BROWSER_ALIVE: 'true',
+      PLAYWRIGHT_MCP_DISABLE_DOWNLOADS: 'true',
+      PLAYWRIGHT_MCP_ALLOWED_TOOLS: 'browser_navigate,browser_click',
+      PLAYWRIGHT_MCP_FILTER_INTERNAL_URLS: 'true',
+    }) as any;
+
+    expect(config.printCapture).toBe(true);
+    expect(config.chromeRuntimeStubs).toBe(true);
+    expect(config.focusEmulation).toBe(true);
+    expect(config.suppressFocus).toBe(true);
+    expect(config.humanizeInput).toBe(true);
+    expect(config.backgroundOpenCapture).toBe(true);
+    expect(config.keepBrowserAlive).toBe(true);
+    expect(config.disableDownloads).toBe(true);
+    expect(config.allowedTools).toEqual(['browser_navigate', 'browser_click']);
+    expect(config.filterInternalUrls).toBe(true);
+  });
+
+  test('false-valued flags survive roundtrip as false', async () => {
+    const config = await resolveCLIConfigForMCP({
+      printCapture: false,
+      chromeRuntimeStubs: false,
+      focusEmulation: false,
+      suppressFocus: false,
+      humanizeInput: false,
+      backgroundOpenCapture: false,
+      keepBrowserAlive: false,
+      disableDownloads: false,
+      filterInternalUrls: false,
+    }, emptyEnv) as any;
+
+    expect(config.printCapture).toBe(false);
+    expect(config.chromeRuntimeStubs).toBe(false);
+    expect(config.focusEmulation).toBe(false);
+    expect(config.suppressFocus).toBe(false);
+    expect(config.humanizeInput).toBe(false);
+    expect(config.backgroundOpenCapture).toBe(false);
+    expect(config.keepBrowserAlive).toBe(false);
+    expect(config.disableDownloads).toBe(false);
+    expect(config.filterInternalUrls).toBe(false);
+  });
 });
