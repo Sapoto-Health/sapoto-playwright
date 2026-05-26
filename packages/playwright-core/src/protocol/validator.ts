@@ -1081,6 +1081,16 @@ scheme.BrowserTypeLaunchPersistentContextParams = tObject({
   testIdAttributeName: tOptional(tString),
   userDataDir: tString,
   slowMo: tOptional(tFloat),
+  printCapture: tOptional(tBoolean),
+  chromeRuntimeStubs: tOptional(tBoolean),
+  focusEmulation: tOptional(tBoolean),
+  suppressFocus: tOptional(tBoolean),
+  humanizeInput: tOptional(tBoolean),
+  backgroundOpenCapture: tOptional(tBoolean),
+  keepBrowserAlive: tOptional(tBoolean),
+  disableDownloads: tOptional(tBoolean),
+  allowedTools: tOptional(tArray(tString)),
+  filterInternalUrls: tOptional(tBoolean),
 });
 scheme.BrowserTypeLaunchPersistentContextResult = tObject({
   browser: tChannel(['Browser']),
@@ -1095,6 +1105,16 @@ scheme.BrowserTypeConnectOverCDPParams = tObject({
   noDefaults: tOptional(tBoolean),
   artifactsDir: tOptional(tString),
   cdpStealth: tOptional(tArray(tString)),
+  printCapture: tOptional(tBoolean),
+  chromeRuntimeStubs: tOptional(tBoolean),
+  focusEmulation: tOptional(tBoolean),
+  suppressFocus: tOptional(tBoolean),
+  humanizeInput: tOptional(tBoolean),
+  backgroundOpenCapture: tOptional(tBoolean),
+  keepBrowserAlive: tOptional(tBoolean),
+  disableDownloads: tOptional(tBoolean),
+  allowedTools: tOptional(tArray(tString)),
+  filterInternalUrls: tOptional(tBoolean),
 });
 scheme.BrowserTypeConnectOverCDPResult = tObject({
   browser: tChannel(['Browser']),

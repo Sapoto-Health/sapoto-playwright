@@ -82,11 +82,12 @@ function isSapotoRuntimeToolAllowed(tool: Tool<any>, config: Pick<ContextConfig,
   return true;
 }
 
-export function filteredTools(config: Pick<ContextConfig, 'capabilities' | 'browser' | 'sapotoRuntimePolicy'>) {
+export function filteredTools(config: Pick<ContextConfig, 'capabilities' | 'browser' | 'sapotoRuntimePolicy' | 'allowedTools'>) {
   return browserTools
       .filter(tool => tool.capability.startsWith('core') || config.capabilities?.includes(tool.capability))
       .filter(tool => !tool.skillOnly)
       .filter(tool => isSapotoRuntimeToolAllowed(tool, config))
+      .filter(tool => !config.allowedTools || config.allowedTools.includes(tool.schema.name))
       .map(tool => ({
         ...tool,
         schema: {

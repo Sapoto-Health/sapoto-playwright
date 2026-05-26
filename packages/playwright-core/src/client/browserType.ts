@@ -98,6 +98,18 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
 
     const logger = options.logger || this._playwright._defaultLaunchOptions?.logger;
     const contextParams = await prepareBrowserContextParams(this._platform, options);
+    const sapotoOptions = options as LaunchPersistentContextOptions & {
+      printCapture?: boolean;
+      chromeRuntimeStubs?: boolean;
+      focusEmulation?: boolean;
+      suppressFocus?: boolean;
+      humanizeInput?: boolean;
+      backgroundOpenCapture?: boolean;
+      keepBrowserAlive?: boolean;
+      disableDownloads?: boolean;
+      allowedTools?: string[];
+      filterInternalUrls?: boolean;
+    };
     const persistentParams: channels.BrowserTypeLaunchPersistentContextParams = {
       ...contextParams,
       ignoreDefaultArgs: Array.isArray(options.ignoreDefaultArgs) ? options.ignoreDefaultArgs : undefined,
@@ -106,6 +118,16 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
       channel: options.channel,
       userDataDir: (this._platform.path().isAbsolute(userDataDir) || !userDataDir) ? userDataDir : this._platform.path().resolve(userDataDir),
       timeout: new TimeoutSettings(this._platform).launchTimeout(options),
+      printCapture: sapotoOptions.printCapture,
+      chromeRuntimeStubs: sapotoOptions.chromeRuntimeStubs,
+      focusEmulation: sapotoOptions.focusEmulation,
+      suppressFocus: sapotoOptions.suppressFocus,
+      humanizeInput: sapotoOptions.humanizeInput,
+      backgroundOpenCapture: sapotoOptions.backgroundOpenCapture,
+      keepBrowserAlive: sapotoOptions.keepBrowserAlive,
+      disableDownloads: sapotoOptions.disableDownloads,
+      allowedTools: sapotoOptions.allowedTools,
+      filterInternalUrls: sapotoOptions.filterInternalUrls,
     };
     const context = await this._wrapApiCall(async () => {
       const result = await this._channel.launchPersistentContext(persistentParams);
@@ -155,6 +177,16 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
     const headers = params.headers ? headersObjectToArray(params.headers) : undefined;
     const sapotoParams = params as api.ConnectOverCDPOptions & {
       cdpStealth?: string[];
+      printCapture?: boolean;
+      chromeRuntimeStubs?: boolean;
+      focusEmulation?: boolean;
+      suppressFocus?: boolean;
+      humanizeInput?: boolean;
+      backgroundOpenCapture?: boolean;
+      keepBrowserAlive?: boolean;
+      disableDownloads?: boolean;
+      allowedTools?: string[];
+      filterInternalUrls?: boolean;
     };
     const result = await this._channel.connectOverCDP({
       endpointURL,
@@ -165,6 +197,16 @@ export class BrowserType extends ChannelOwner<channels.BrowserTypeChannel> imple
       noDefaults: params.noDefaults,
       artifactsDir: params.artifactsDir,
       cdpStealth: sapotoParams.cdpStealth,
+      printCapture: sapotoParams.printCapture,
+      chromeRuntimeStubs: sapotoParams.chromeRuntimeStubs,
+      focusEmulation: sapotoParams.focusEmulation,
+      suppressFocus: sapotoParams.suppressFocus,
+      humanizeInput: sapotoParams.humanizeInput,
+      backgroundOpenCapture: sapotoParams.backgroundOpenCapture,
+      keepBrowserAlive: sapotoParams.keepBrowserAlive,
+      disableDownloads: sapotoParams.disableDownloads,
+      allowedTools: sapotoParams.allowedTools,
+      filterInternalUrls: sapotoParams.filterInternalUrls,
     });
     return await this._browserFromConnectResult(result);
   }

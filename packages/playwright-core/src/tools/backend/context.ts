@@ -67,6 +67,7 @@ export type ContextConfig = {
     initScript?: string[];
     initPage?: string[];
   };
+  allowedTools?: string[];
   skillMode?: boolean;
 };
 
