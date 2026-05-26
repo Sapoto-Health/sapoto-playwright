@@ -81,6 +81,18 @@ export type CLIOptions = {
   userAgent?: string;
   userDataDir?: string;
   viewportSize?: ViewportSize;
+
+  // Sapoto behavior-control flags
+  printCapture?: boolean;
+  chromeRuntimeStubs?: boolean;
+  focusEmulation?: boolean;
+  suppressFocus?: boolean;
+  humanizeInput?: boolean;
+  backgroundOpenCapture?: boolean;
+  keepBrowserAlive?: boolean;
+  disableDownloads?: boolean;
+  allowedTools?: string[];
+  filterInternalUrls?: boolean;
 };
 
 const defaultConfig: MergedConfig = {
@@ -406,6 +418,16 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
       action: cliOptions.timeoutAction,
       navigation: cliOptions.timeoutNavigation,
     },
+    printCapture: cliOptions.printCapture,
+    chromeRuntimeStubs: cliOptions.chromeRuntimeStubs,
+    focusEmulation: cliOptions.focusEmulation,
+    suppressFocus: cliOptions.suppressFocus,
+    humanizeInput: cliOptions.humanizeInput,
+    backgroundOpenCapture: cliOptions.backgroundOpenCapture,
+    keepBrowserAlive: cliOptions.keepBrowserAlive,
+    disableDownloads: cliOptions.disableDownloads,
+    allowedTools: cliOptions.allowedTools,
+    filterInternalUrls: cliOptions.filterInternalUrls,
   };
 
   return { ...config, configFile: cliOptions.config };
@@ -458,6 +480,16 @@ export function configFromEnv(env?: NodeJS.ProcessEnv): Config & { configFile?: 
   options.userAgent = envToString(e.PLAYWRIGHT_MCP_USER_AGENT);
   options.userDataDir = envToString(e.PLAYWRIGHT_MCP_USER_DATA_DIR);
   options.viewportSize = resolutionParser('--viewport-size', e.PLAYWRIGHT_MCP_VIEWPORT_SIZE);
+  options.printCapture = envToBoolean(e.PLAYWRIGHT_MCP_PRINT_CAPTURE);
+  options.chromeRuntimeStubs = envToBoolean(e.PLAYWRIGHT_MCP_CHROME_RUNTIME_STUBS);
+  options.focusEmulation = envToBoolean(e.PLAYWRIGHT_MCP_FOCUS_EMULATION);
+  options.suppressFocus = envToBoolean(e.PLAYWRIGHT_MCP_SUPPRESS_FOCUS);
+  options.humanizeInput = envToBoolean(e.PLAYWRIGHT_MCP_HUMANIZE_INPUT);
+  options.backgroundOpenCapture = envToBoolean(e.PLAYWRIGHT_MCP_BACKGROUND_OPEN_CAPTURE);
+  options.keepBrowserAlive = envToBoolean(e.PLAYWRIGHT_MCP_KEEP_BROWSER_ALIVE);
+  options.disableDownloads = envToBoolean(e.PLAYWRIGHT_MCP_DISABLE_DOWNLOADS);
+  options.allowedTools = commaSeparatedList(e.PLAYWRIGHT_MCP_ALLOWED_TOOLS);
+  options.filterInternalUrls = envToBoolean(e.PLAYWRIGHT_MCP_FILTER_INTERNAL_URLS);
   return configFromCLIOptions(options);
 }
 
@@ -605,6 +637,14 @@ export function enumParser<T extends string>(name: string, options: T[], value: 
   if (!options.includes(value as T))
     throw new Error(`Invalid ${name}: ${value}. Valid values are: ${options.join(', ')}`);
   return value as T;
+}
+
+export function onOffParser(name: string, value: string): boolean {
+  if (value === 'on')
+    return true;
+  if (value === 'off')
+    return false;
+  throw new Error(`Invalid ${name}: ${value}. Valid values are: on, off`);
 }
 
 function envToBoolean(value: string | undefined): boolean | undefined {
