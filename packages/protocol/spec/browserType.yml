@@ -36,6 +36,18 @@ BrowserType:
         $mixin2: ContextOptions
         userDataDir: string
         slowMo: float?
+        printCapture: boolean?
+        chromeRuntimeStubs: boolean?
+        focusEmulation: boolean?
+        suppressFocus: boolean?
+        humanizeInput: boolean?
+        backgroundOpenCapture: boolean?
+        keepBrowserAlive: boolean?
+        disableDownloads: boolean?
+        allowedTools:
+          type: array?
+          items: string
+        filterInternalUrls: boolean?
       returns:
         browser: Browser
         context: BrowserContext
@@ -55,6 +67,18 @@ BrowserType:
         cdpStealth:
           type: array?
           items: string
+        printCapture: boolean?
+        chromeRuntimeStubs: boolean?
+        focusEmulation: boolean?
+        suppressFocus: boolean?
+        humanizeInput: boolean?
+        backgroundOpenCapture: boolean?
+        keepBrowserAlive: boolean?
+        disableDownloads: boolean?
+        allowedTools:
+          type: array?
+          items: string
+        filterInternalUrls: boolean?
       returns:
         browser: Browser
         defaultContext: BrowserContext?

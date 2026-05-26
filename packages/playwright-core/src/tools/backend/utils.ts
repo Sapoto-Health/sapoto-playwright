@@ -80,3 +80,19 @@ export function eventWaiter<T>(page: playwright.Page, event: string, timeout: nu
     abort: abort!
   };
 }
+
+/**
+ * Returns a per-keystroke delay (ms) for humanized typing when the flag is on.
+ * The delay is gaussian-distributed around 80ms with a stddev of 30ms, clamped
+ * to [30, 200]. Returns 0 when humanizeInput is false/undefined.
+ */
+export function humanizeTypingDelay(enabled: boolean | undefined): number {
+  if (!enabled)
+    return 0;
+  // Box-Muller transform for a single normal sample.
+  const u1 = Math.random();
+  const u2 = Math.random();
+  const normal = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  const delay = 80 + normal * 30;
+  return Math.max(30, Math.min(200, Math.round(delay)));
+}

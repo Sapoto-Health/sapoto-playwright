@@ -113,6 +113,21 @@ export abstract class BrowserType extends SdkObject {
     try {
       if ((options as any).__testHookBeforeCreateBrowser)
         await progress.race((options as any).__testHookBeforeCreateBrowser());
+      // Sapoto behavior-control flags are carried on the persistent-context
+      // options object (BrowserTypeLaunchPersistentContextOptions) which is
+      // wider than the types.BrowserContextOptions declaration.
+      const sapotoPersistent = persistent as types.BrowserContextOptions & {
+        printCapture?: boolean;
+        chromeRuntimeStubs?: boolean;
+        focusEmulation?: boolean;
+        suppressFocus?: boolean;
+        humanizeInput?: boolean;
+        backgroundOpenCapture?: boolean;
+        keepBrowserAlive?: boolean;
+        disableDownloads?: boolean;
+        allowedTools?: string[];
+        filterInternalUrls?: boolean;
+      } | undefined;
       const browserOptions: BrowserOptions = {
         name: this._name,
         browserType: this._name,
@@ -132,6 +147,16 @@ export abstract class BrowserType extends SdkObject {
         originalLaunchOptions: options,
         userDataDir: persistent ? userDataDir : undefined,
         cdpStealth: new Set(),
+        printCapture: sapotoPersistent?.printCapture,
+        chromeRuntimeStubs: sapotoPersistent?.chromeRuntimeStubs,
+        focusEmulation: sapotoPersistent?.focusEmulation,
+        suppressFocus: sapotoPersistent?.suppressFocus,
+        humanizeInput: sapotoPersistent?.humanizeInput,
+        backgroundOpenCapture: sapotoPersistent?.backgroundOpenCapture,
+        keepBrowserAlive: sapotoPersistent?.keepBrowserAlive,
+        disableDownloads: sapotoPersistent?.disableDownloads,
+        allowedTools: sapotoPersistent?.allowedTools,
+        filterInternalUrls: sapotoPersistent?.filterInternalUrls,
       };
       if (persistent)
         validateBrowserContextOptions(persistent, browserOptions);

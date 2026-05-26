@@ -67,7 +67,18 @@ export type ContextConfig = {
     initScript?: string[];
     initPage?: string[];
   };
+  allowedTools?: string[];
   skillMode?: boolean;
+  // Sapoto behavior-control flags (threaded from FullConfig)
+  suppressFocus?: boolean;
+  keepBrowserAlive?: boolean;
+  disableDownloads?: boolean;
+  filterInternalUrls?: boolean;
+  printCapture?: boolean;
+  backgroundOpenCapture?: boolean;
+  chromeRuntimeStubs?: boolean;
+  humanizeInput?: boolean;
+  focusEmulation?: boolean;
 };
 
 type ContextOptions = {
@@ -179,7 +190,8 @@ export class Context {
     const tab = this._tabs[index];
     if (!tab)
       throw new Error(`Tab ${index} not found`);
-    await tab.page.bringToFront();
+    if (!this.config.suppressFocus)
+      await tab.page.bringToFront();
     this._currentTab = tab;
     return tab;
   }
@@ -359,8 +371,11 @@ export class Context {
       return;
     if (!URL.canParse(url))
       return;
-    if (new URL(url).protocol === 'file:')
+    const parsed = new URL(url);
+    if (parsed.protocol === 'file:')
       throw new Error(`Access to "file:" protocol is blocked. Attempted URL: "${url}"`);
+    if (this.config.filterInternalUrls && isInternalBrowserUrl(parsed))
+      throw new Error(`Navigation to internal browser URL is blocked. Attempted URL: "${url}"`);
   }
 
   lookupSecret(secretName: string): { value: string, code: string } {
@@ -424,4 +439,10 @@ async function checkFile(options: ContextOptions, resolvedFilename: string, flag
   const workspace = options.cwd;
   if (!isPathInside(output, resolvedFilename) && !isPathInside(workspace, resolvedFilename))
     throw new Error(`File access denied: ${resolvedFilename} is outside allowed roots. Allowed roots: ${output}, ${workspace}`);
+}
+
+const internalProtocols = new Set(['chrome:', 'chrome-extension:', 'about:', 'devtools:', 'edge:', 'brave:']);
+
+function isInternalBrowserUrl(url: URL): boolean {
+  return internalProtocols.has(url.protocol);
 }

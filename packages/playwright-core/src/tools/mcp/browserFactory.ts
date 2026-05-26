@@ -114,7 +114,17 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
     timeout: config.browser.cdpTimeout,
     artifactsDir,
     cdpStealth: launchOptions.cdpStealth,
-  } as playwrightTypes.ConnectOverCDPOptions & { cdpStealth?: string[] });
+    printCapture: config.printCapture,
+    chromeRuntimeStubs: config.chromeRuntimeStubs,
+    focusEmulation: config.focusEmulation,
+    suppressFocus: config.suppressFocus,
+    humanizeInput: config.humanizeInput,
+    backgroundOpenCapture: config.backgroundOpenCapture,
+    keepBrowserAlive: config.keepBrowserAlive,
+    disableDownloads: config.disableDownloads,
+    allowedTools: config.allowedTools,
+    filterInternalUrls: config.filterInternalUrls,
+  } as playwrightTypes.ConnectOverCDPOptions & { cdpStealth?: string[], printCapture?: boolean, chromeRuntimeStubs?: boolean, focusEmulation?: boolean, suppressFocus?: boolean, humanizeInput?: boolean, backgroundOpenCapture?: boolean, keepBrowserAlive?: boolean, disableDownloads?: boolean, allowedTools?: string[], filterInternalUrls?: boolean });
   return browser;
 }
 
@@ -172,8 +182,34 @@ async function createPersistentBrowser(config: FullConfig, clientInfo: ClientInf
   };
   if (config.browser.sapotoRuntime)
     await prepareSapotoChromeRuntimeProfile(userDataDir, launchOptions);
+
+  // Thread Sapoto behavior-control flags from MCP config into launch options
+  // so they flow through the protocol to BrowserOptions on the server side.
+  const sapotoLaunchOptions = launchOptions as typeof launchOptions & {
+    printCapture?: boolean;
+    chromeRuntimeStubs?: boolean;
+    focusEmulation?: boolean;
+    suppressFocus?: boolean;
+    humanizeInput?: boolean;
+    backgroundOpenCapture?: boolean;
+    keepBrowserAlive?: boolean;
+    disableDownloads?: boolean;
+    allowedTools?: string[];
+    filterInternalUrls?: boolean;
+  };
+  sapotoLaunchOptions.printCapture = config.printCapture;
+  sapotoLaunchOptions.chromeRuntimeStubs = config.chromeRuntimeStubs;
+  sapotoLaunchOptions.focusEmulation = config.focusEmulation;
+  sapotoLaunchOptions.suppressFocus = config.suppressFocus;
+  sapotoLaunchOptions.humanizeInput = config.humanizeInput;
+  sapotoLaunchOptions.backgroundOpenCapture = config.backgroundOpenCapture;
+  sapotoLaunchOptions.keepBrowserAlive = config.keepBrowserAlive;
+  sapotoLaunchOptions.disableDownloads = config.disableDownloads;
+  sapotoLaunchOptions.allowedTools = config.allowedTools;
+  sapotoLaunchOptions.filterInternalUrls = config.filterInternalUrls;
+
   try {
-    const browserContext = await browserType.launchPersistentContext(userDataDir, launchOptions);
+    const browserContext = await browserType.launchPersistentContext(userDataDir, sapotoLaunchOptions);
     const browser = browserContext.browser()!;
     return browser;
   } catch (error: any) {

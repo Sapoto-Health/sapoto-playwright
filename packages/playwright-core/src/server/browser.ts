@@ -67,6 +67,17 @@ export type BrowserOptions = {
   userDataDir?: string;
   noDefaults?: boolean;
   cdpStealth: Set<CdpStealthFeature>;
+  // Sapoto behavior-control flags
+  printCapture?: boolean;
+  chromeRuntimeStubs?: boolean;
+  focusEmulation?: boolean;
+  suppressFocus?: boolean;
+  humanizeInput?: boolean;
+  backgroundOpenCapture?: boolean;
+  keepBrowserAlive?: boolean;
+  disableDownloads?: boolean;
+  allowedTools?: string[];
+  filterInternalUrls?: boolean;
 };
 
 export abstract class Browser extends SdkObject {
