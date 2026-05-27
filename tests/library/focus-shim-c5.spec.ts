@@ -35,9 +35,10 @@
  * download URLs now route the same way (previously fell through to native
  * with a documented focus-steal trade-off).
  *
- * Plus: with suppressFocus=false the entire C5 block is omitted from the script
- * source (the IIFE only emits C4+C5 when the flag is set), so the production
- * `CDP_STEALTH_INIT_SCRIPT` constant must NOT contain the C5 install marker.
+ * Plus: with suppressFocus=false the entire C4+C5 block is omitted from the
+ * script source (the IIFE only emits C4+C5 when the flag is set), so the
+ * production `CDP_STEALTH_INIT_SCRIPT` constant must NOT contain the C5
+ * install marker.
  *
  * Approach: this file mirrors `stealth-stubs.spec.ts` — we evaluate the script
  * source inside a Node `vm` sandbox with a hand-rolled DOM. Real Chromium would
@@ -100,6 +101,7 @@ function newShimContext(opts: { electronBridge?: 'real' | 'truthy-but-not-fn' | 
     globalThis.console = {
       log: () => {},
       warn: (msg) => { try { globalThis.__warnings.push(String(msg)); } catch (_) {} },
+      debug: (msg) => { try { globalThis.__warnings.push(String(msg)); } catch (_) {} },
       error: () => {},
     };
 
@@ -168,8 +170,8 @@ function newShimContext(opts: { electronBridge?: 'real' | 'truthy-but-not-fn' | 
   return sandbox;
 }
 
-function installShim(ctx: ShimSandbox, suppressFocus: boolean, stealth: boolean = true) {
-  vm.runInContext(buildStealthInitScript({ stealth, suppressFocus }), ctx);
+function installShim(ctx: ShimSandbox, suppressFocus: boolean) {
+  vm.runInContext(buildStealthInitScript({ suppressFocus }), ctx);
 }
 
 function callShimOpen(ctx: ShimSandbox, url: any, target?: any, features?: any) {
@@ -235,18 +237,13 @@ test('suppressFocus=true installs the shim and emits the install marker', () => 
 // Sapoto #1044 regression: chrome-mode gate split (stealth=false + suppressFocus=true)
 // ------------------------------------------------------------------
 
-test('stealth=false + suppressFocus=true still installs C5 FocusShim (chrome-mode regression)', () => {
-  // Before #1044 the outer `if (this.config.stealth !== false)` gate at
-  // tools/backend/context.ts wrapped the entire init script, so Sapoto's
-  // --no-stealth chrome mode skipped FocusShim entirely and window.open
-  // ran natively. Post-#1044 the two gates are independent.
-  //
-  // This test exercises the exact combination chrome mode uses: stealth
-  // off, suppressFocus on. The FocusShim install marker must still appear
-  // and window.open must be a shim, not the native stub we installed.
+test('suppressFocus=true installs C5 FocusShim (chrome-mode shape post-#1137)', () => {
+  // Post-#1137 the `stealth` gate is removed entirely. This test exercises
+  // chrome mode (suppressFocus=true): the FocusShim install marker must
+  // appear and window.open must be a shim.
   const ctx = newShimContext();
   const nativeOpen = ctx.open;
-  installShim(ctx, /*suppressFocus*/ true, /*stealth*/ false);
+  installShim(ctx, /*suppressFocus*/ true);
 
   // FocusShim install marker fired.
   expect(ctx.__warnings.some((w: string) => w.startsWith('[FocusShim] installed at'))).toBe(true);
@@ -263,12 +260,8 @@ test('stealth=false + suppressFocus=true still installs C5 FocusShim (chrome-mod
   expect(ctx.__nativeOpenCalls).toHaveLength(0);
   expect(result).toBeNull();
 
-  // C1/C2 stealth stubs MUST NOT install when stealth=false. Confirm by
-  // checking that navigator.webdriver was NOT redefined (the C1 stub would
-  // set it to `false` boolean; without C1 it stays at the sandbox default
-  // of `true` which `newShimContext` left unset → navigator missing).
-  // newShimContext sets navigator.webdriver=true via the setup script, so
-  // verify it stayed truthy.
+  // C1/C2 stealth stubs are removed by #1137 — navigator.webdriver stays
+  // at whatever the browser/sandbox initially set.
   expect(vm.runInContext('navigator.webdriver', ctx)).toBe(true);
 });
 

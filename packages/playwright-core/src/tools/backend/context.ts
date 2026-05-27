@@ -433,22 +433,17 @@ export class Context {
     for (const initScript of this.config.browser?.initScript || [])
       this._disposables.push(await browserContext.addInitScript({ path: path.resolve(this.options.cwd, initScript) }));
 
-    // CDP stealth init script. The two gates are independent:
-    //   - stealth (default ON; --no-stealth opts out) → C1/C2 fingerprint stubs.
-    //     Sapoto's chrome mode passes --no-stealth because chrome's real
-    //     identity must not be shadowed by stubs.
-    //   - suppressFocus (off by default; --suppress-focus opts in) → C3 deferred
-    //     print + Path D srcdoc bridge, C4 suppressFocus-mode print override,
-    //     C5 window.open focus-steal shim (Sapoto #1036, refactor #1043).
-    //     Sapoto's chrome mode enables this even when --no-stealth is set.
-    // See stealthInitScript.ts for the per-stub rationale and the third-party-
-    // frame guard backstory (Sapoto #1036). If both gates are off, skip the
-    // addInitScript entirely — there's nothing to install.
-    const stealth = this.config.stealth !== false;
+    // Operational init script (C3 deferred print, C4 suppressFocus-mode print,
+    // C5 window.open focus-steal shim). Red-tier JS stealth patches (C1/C2)
+    // were removed by Tracer #1137. Only suppressFocus gates remain — when
+    // false the script installs only C3 (deferred print safety net); when true
+    // it additionally installs C4 + C5. Skip entirely when suppressFocus is
+    // off — the C3 deferred print is a no-op safety net that only matters in
+    // Sapoto's Electron mode, which always sets suppressFocus=true.
     const suppressFocus = !!this.config.suppressFocus;
-    if (stealth || suppressFocus) {
+    if (suppressFocus) {
       this._disposables.push(await browserContext.addInitScript(
-          buildStealthInitScript({ stealth, suppressFocus })));
+          buildStealthInitScript({ suppressFocus })));
     }
 
     for (const page of browserContext.pages()) {

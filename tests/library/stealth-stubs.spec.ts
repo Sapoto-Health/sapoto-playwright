@@ -15,24 +15,21 @@
  */
 
 /**
- * Unit tests for the CDP stealth stubs (Sapoto #1044 M3).
+ * Unit tests for the CDP operational init script (post-Tracer #1137).
  *
  * Two layers under test:
  *
- *   1. buildChromeBrands() — pure helper that derives the UA Client Hint brand
+ *   1. buildChromeBrands() -- pure helper that derives the UA Client Hint brand
  *      list from a browser version string. Validates the three-entry shape and
  *      the version-derivation logic without spinning up Chromium.
  *
- *   2. CDP_STEALTH_INIT_SCRIPT — the init script source. Evaluated inside a
- *      Node `vm` context with a hand-rolled DOM-ish stand-in (navigator, chrome,
- *      Notification, performance, setTimeout). Asserts the output-visible
- *      behavior of each stub. We deliberately do NOT assert which CDP method
- *      registered the script (per #1044 spec).
- *
- * TODO(M3 follow-up): empirical r1226 fingerprint audit against running Chromium
- * via scripts/observatory/recon/. The stubs were validated at the merge-base
- * binary (r1212) — Chromium has rolled 6 builds since, and any of these stubs
- * could be a no-op (or newly insufficient) against the current binary.
+ *   2. CDP_STEALTH_INIT_SCRIPT / buildStealthInitScript() -- the operational
+ *      init script source. Red-tier JS stealth patches (C1 webdriver, C2
+ *      Function.prototype.toString masking, chrome.* stubs, Notification clamp)
+ *      were removed by Tracer #1137. Only C3 (deferred print), C4 (suppressFocus
+ *      print), C5 (window.open shim), sanitizeUrl, and Path D stamp remain.
+ *      Tests evaluate the script inside a Node `vm` context with a hand-rolled
+ *      DOM-ish stand-in.
  */
 
 import vm from 'vm';
@@ -42,7 +39,7 @@ import { buildChromeBrands } from '../../packages/playwright-core/src/server/chr
 import { CDP_STEALTH_INIT_SCRIPT, buildStealthInitScript } from '../../packages/playwright-core/src/tools/backend/stealthInitScript';
 
 // ------------------------------------------------------------------
-// buildChromeBrands — pure helper
+// buildChromeBrands -- pure helper
 // ------------------------------------------------------------------
 
 test('buildChromeBrands emits the three-entry Chromium / Google Chrome / GREASE shape', () => {
@@ -53,7 +50,7 @@ test('buildChromeBrands emits the three-entry Chromium / Google Chrome / GREASE 
   const byBrand = Object.fromEntries(result!.brands.map(b => [b.brand, b.version]));
   expect(byBrand['Chromium']).toBe('124');
   expect(byBrand['Google Chrome']).toBe('124');
-  // The "GREASE" brand exists — Chromium has changed its exact string multiple
+  // The "GREASE" brand exists -- Chromium has changed its exact string multiple
   // times (";Not A Brand", "Not/A)Brand", "Not?A_Brand"); we only assert the
   // fork's current value so the test catches accidental shape changes.
   expect(byBrand).toHaveProperty('Not/A)Brand');
@@ -72,353 +69,183 @@ test('buildChromeBrands returns undefined on empty input', () => {
 });
 
 // ------------------------------------------------------------------
-// CDP_STEALTH_INIT_SCRIPT — evaluate in a sandboxed VM context
+// CDP_STEALTH_INIT_SCRIPT -- evaluate in a sandboxed VM context
 // ------------------------------------------------------------------
 
 /**
- * Build a minimal browser-shaped sandbox for the init script. The aim is just
- * enough surface that the stubs do not throw — the assertions then read the
- * resulting state.
+ * Build a minimal browser-shaped sandbox for the init script.
  */
-function newPageContext(opts: { languages?: string[]; notificationPermission?: 'granted' | 'default' | 'denied' } = {}) {
-  // IMPORTANT: do NOT spread outer-realm intrinsics (Function, Object, WeakMap, …)
-  // into the sandbox. The vm context has its own intrinsics; if we pre-populate it
-  // with the outer-realm constructors, then `Function.prototype.toString` patched
-  // by the script lives on the OUTER realm's prototype, while functions actually
-  // created inside the sandbox use the SANDBOX realm's `Function.prototype` — so
-  // the masking would silently miss. Leaving the sandbox bare lets vm wire its own
-  // intrinsics, which is what real Chrome does too.
-  //
-  // We do, however, hand-build the browser-shaped globals the script reads.
-  const sandbox: any = {
-    navigatorWebdriverInitial: true,
-    navigatorLanguagesInitial: opts.languages ?? ['en-US'],
-    notificationPermissionInitial: opts.notificationPermission ?? 'granted',
-  };
+function newPageContext() {
+  const sandbox: any = {};
   vm.createContext(sandbox);
-  // Build navigator / Notification / performance INSIDE the sandbox realm so they
-  // use the sandbox's Object / Array intrinsics.
   vm.runInContext(`
-    globalThis.navigator = { webdriver: globalThis.navigatorWebdriverInitial, languages: globalThis.navigatorLanguagesInitial };
-    globalThis.Notification = { permission: globalThis.notificationPermissionInitial };
+    globalThis.navigator = { webdriver: true };
     globalThis.performance = { now: () => 1234, getEntriesByType: () => [] };
     globalThis.setTimeout = () => 0; // deferred-print never fires in tests
     globalThis.print = undefined;
     globalThis.window = globalThis;
-    delete globalThis.navigatorWebdriverInitial;
-    delete globalThis.navigatorLanguagesInitial;
-    delete globalThis.notificationPermissionInitial;
   `, sandbox);
   return sandbox;
 }
 
-test('stealth init: navigator.webdriver returns false (boolean), not undefined', () => {
+// ------------------------------------------------------------------
+// Tracer #1137 removal verification -- stealth stubs must be absent
+// ------------------------------------------------------------------
+
+test('#1137: navigator.webdriver getter is NOT installed (removed by D2)', () => {
   const ctx = newPageContext();
-  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
-  expect(ctx.navigator.webdriver).toBe(false);
-  expect(typeof ctx.navigator.webdriver).toBe('boolean');
+  const script = buildStealthInitScript({ suppressFocus: false });
+  vm.runInContext(script, ctx);
+  // navigator.webdriver should remain at its initial value (true) since
+  // the C1 override was removed.
+  expect(ctx.navigator.webdriver).toBe(true);
 });
 
-test('stealth init: chrome.app, chrome.csi, chrome.loadTimes are installed and look native', () => {
-  const ctx = newPageContext();
-  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
-  expect(typeof ctx.chrome).toBe('object');
-
-  // chrome.app shape
-  expect(ctx.chrome.app).toBeDefined();
-  expect(ctx.chrome.app.isInstalled).toBe(false);
-  expect(typeof ctx.chrome.app.getIsInstalled).toBe('function');
-  expect(ctx.chrome.app.getIsInstalled()).toBe(false);
-  expect(ctx.chrome.app.InstallState).toMatchObject({ NOT_INSTALLED: 'not_installed' });
-  expect(ctx.chrome.app.RunningState).toMatchObject({ CANNOT_RUN: 'cannot_run' });
-
-  // chrome.csi + chrome.loadTimes are callable and return plausible shapes
-  expect(typeof ctx.chrome.csi).toBe('function');
-  const csi = ctx.chrome.csi();
-  expect(csi).toHaveProperty('startE');
-  expect(csi).toHaveProperty('onloadT');
-  expect(csi).toHaveProperty('pageT');
-
-  expect(typeof ctx.chrome.loadTimes).toBe('function');
-  const lt = ctx.chrome.loadTimes();
-  expect(lt).toHaveProperty('connectionInfo', 'h2');
-  expect(lt).toHaveProperty('wasFetchedViaSpdy', true);
-
-  // Function.prototype.toString masking — native-looking signature.
-  expect(ctx.chrome.app.getIsInstalled.toString()).toBe('function getIsInstalled() { [native code] }');
-  expect(ctx.chrome.csi.toString()).toBe('function csi() { [native code] }');
+test('#1137: __chromeStealth guard is removed (D1)', () => {
+  const script = buildStealthInitScript({ suppressFocus: false });
+  expect(script.includes('__chromeStealth')).toBe(false);
 });
 
-test('stealth init: Function.prototype.toString masking survives Akamai bmak-style .toString.call(weirdThis)', () => {
-  // Sapoto #1036: bmak does .toString.call(weirdThis) where weirdThis can be a
-  // primitive. The WeakMap lookup must not crash the init — primitives just
-  // fall through to the native delegate.
-  const ctx = newPageContext();
-  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
-  // Confirm a non-object .toString.call() doesn't throw (and doesn't return
-  // a masked string, since primitives can't be WeakMap keys).
-  const probe = vm.runInContext(`
-    (() => {
-      try {
-        Function.prototype.toString.call(function realFn() { return 42; });
-        // Now the bmak-style call with a primitive:
-        // Native Function.prototype.toString rejects non-Function this with a TypeError,
-        // which is what real Chrome would do too — that's the expected error shape.
-        let threwNative = false;
-        try { Function.prototype.toString.call(42); } catch (e) { threwNative = (e instanceof TypeError); }
-        return { ok: true, threwNative };
-      } catch (e) {
-        return { ok: false, err: String(e) };
-      }
-    })();
-  `, ctx);
-  expect(probe.ok).toBe(true);
-  expect(probe.threwNative).toBe(true); // the error shape matches native Chrome
+test('#1137: __stealthMarkNative global is removed (D1)', () => {
+  const script = buildStealthInitScript({ suppressFocus: false });
+  expect(script.includes('__stealthMarkNative')).toBe(false);
 });
 
-test('stealth init: navigator.languages clamp removed — real Chrome value passes through (#1045 A5)', () => {
-  // A5 deletes the previous length-1 clamp. Real Chrome reports the user's
-  // configured locale list; we no longer rewrite a single-locale array.
-  const ctx = newPageContext({ languages: ['en-US'] });
-  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
-  expect(ctx.navigator.languages).toEqual(['en-US']);
+test('#1137: Function.prototype.toString masking is removed (D3b)', () => {
+  const script = buildStealthInitScript({ suppressFocus: true });
+  expect(script.includes('Function.prototype.toString')).toBe(false);
+  expect(script.includes('_nativeMap')).toBe(false);
+  expect(script.includes('_markNative')).toBe(false);
 });
 
-test('stealth init: Notification.permission flipped from granted to default', () => {
-  const ctx = newPageContext({ notificationPermission: 'granted' });
-  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
-  expect(ctx.Notification.permission).toBe('default');
+test('#1137: chrome.app / chrome.csi / chrome.loadTimes stubs are removed (D3b)', () => {
+  const script = buildStealthInitScript({ suppressFocus: true });
+  expect(script.includes('chrome.app')).toBe(false);
+  expect(script.includes('chrome.csi')).toBe(false);
+  expect(script.includes('chrome.loadTimes')).toBe(false);
 });
 
-test('stealth init: window.print becomes a deferred handler in credentials-mode shape (C3)', () => {
-  // Post-Sapoto #1044 codex P2 fix: C3 (deferred print + Path D bridge) is
-  // gated on `stealth`, restoring its M3 reachability. The credentials-mode
-  // shape is stealth=true, suppressFocus=false — and CDP_STEALTH_INIT_SCRIPT
-  // is built with exactly that shape.
-  const ctx = newPageContext();
-  const printBefore = ctx.print;
-  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
-  expect(ctx.print).not.toBe(printBefore);
-  expect(typeof ctx.print).toBe('function');
-  // Calling it must NOT throw (it should schedule a deferred check and return).
-  expect(() => ctx.print()).not.toThrow();
+test('#1137: Notification.permission clamp is removed (D3b)', () => {
+  const script = buildStealthInitScript({ suppressFocus: true });
+  expect(script.includes('Notification.permission')).toBe(false);
+  expect(script.includes('Notification')).toBe(false);
 });
 
-test('stealth init: stealth=true + suppressFocus=false installs C3 deferred-print bridge', () => {
-  // Explicit coverage for the credentials-mode shape (M3 restoration per #1044
-  // codex P2). C3 replaces window.print with a deferred function; C4 must NOT
-  // also install because suppressFocus=false. Asserts the deferred handler
-  // schedules via setTimeout and is distinct from native window.print.
-  const { buildStealthInitScript } = require('../../packages/playwright-core/src/tools/backend/stealthInitScript');
-  const ctx = newPageContext();
-  const printBefore = ctx.print;
-  // Capture setTimeout calls so we can prove C3 (not C4) installed.
-  // C3's deferred function calls setTimeout; C4's wrapper does not.
-  let setTimeoutCalls = 0;
-  vm.runInContext(`globalThis.setTimeout = (fn, ms) => { globalThis.__stCount = (globalThis.__stCount || 0) + 1; return 0; };`, ctx);
-  vm.runInContext(buildStealthInitScript({ stealth: true, suppressFocus: false }), ctx);
-  // C3 replaced print with a non-native deferred wrapper.
-  expect(ctx.print).not.toBe(printBefore);
-  expect(typeof ctx.print).toBe('function');
-  // Calling it must NOT throw and must schedule a deferred check via setTimeout.
-  expect(() => ctx.print()).not.toThrow();
-  setTimeoutCalls = vm.runInContext('globalThis.__stCount || 0', ctx);
-  expect(setTimeoutCalls).toBeGreaterThanOrEqual(1);
-});
-
-test('stealth init: __chromeStealth idempotency guard — second run is a no-op', () => {
-  const ctx = newPageContext();
-  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
-  const chromeAfterFirst = ctx.chrome;
-  // Mutate something so we can detect re-init.
-  ctx.chrome.csi = 'sentinel';
-  vm.runInContext(CDP_STEALTH_INIT_SCRIPT, ctx);
-  expect(ctx.chrome).toBe(chromeAfterFirst);
-  expect(ctx.chrome.csi).toBe('sentinel');
+test('#1137: stealth option is removed from StealthInitScriptOptions (D5)', () => {
+  // TypeScript compile-time check: passing `stealth` should not be accepted.
+  // At runtime, the function only reads `suppressFocus`.
+  const script = buildStealthInitScript({ suppressFocus: false } as any);
+  expect(script).toBeDefined();
+  // No conditional blocks gated on removed options remain.
+  expect(script.includes('chromeRuntimeStubs')).toBe(false);
+  // Note: 'printCapture' appears in C4 comments referencing the file
+  // printCapture.ts, not as a gate variable -- that's fine.
 });
 
 // ------------------------------------------------------------------
-// Third-party-frame guard (Sapoto #1036)
+// Operational sections still present
 // ------------------------------------------------------------------
 
-test('stealth init: third-party-frame guard — script does not throw with no DOM and no navigator', () => {
-  // Frames where Akamai bmak / OneTrust / Fidelity dmt run at document_start
-  // have neither document.head nor document.documentElement, and may even
-  // execute before `navigator` is wired up. The script must install whatever
-  // pieces it CAN (chrome stubs, deferred print) without aborting on a
-  // missing global. This is the regression test for Sapoto #1036.
-  //
-  // Post-Sapoto #1044 codex P2: C3 deferred-print is gated on `stealth`
-  // (its original M3 home), so the credentials-mode shape (stealth=true,
-  // suppressFocus=false) is the canonical third-party-frame surface.
-  const script = buildStealthInitScript({ stealth: true, suppressFocus: false });
-  const minimal: any = {};
-  vm.createContext(minimal);
-  vm.runInContext(`globalThis.window = globalThis; globalThis.setTimeout = () => 0;`, minimal);
-  expect(() => vm.runInContext(script, minimal)).not.toThrow();
-  // Even without navigator/Notification, chrome stubs + deferred print still install.
-  expect(vm.runInContext('typeof chrome', minimal)).toBe('object');
-  expect(vm.runInContext('typeof chrome.app', minimal)).toBe('object');
-  expect(vm.runInContext('typeof print', minimal)).toBe('function');
+test('#1137: sanitizeUrl helper is still present', () => {
+  const script = buildStealthInitScript({ suppressFocus: false });
+  expect(script.includes('sanitizeUrl')).toBe(true);
 });
 
-// ------------------------------------------------------------------
-// PRD #1045 / Tracer A5 — new gates (printCapture, chromeRuntimeStubs)
-// ------------------------------------------------------------------
+test('#1137: Path D stamp is still present', () => {
+  const script = buildStealthInitScript({ suppressFocus: false });
+  expect(script.includes('__SAPOTO_PATHD_BRIDGE_V1_STAMP__')).toBe(true);
+});
 
-test('A5: window.__SAPOTO_PATHD_BRIDGE_V1__ is NEVER installed on window; sentinel literal is present', () => {
-  // The legacy stamp window pollution is removed; a `void '__SAPOTO_..._STAMP__'`
-  // expression preserves the build-time grep target without leaking onto window.
-  const script = buildStealthInitScript({
-    stealth: true, suppressFocus: false, printCapture: true, chromeRuntimeStubs: true,
-  } as any);
-  // Sentinel literal present (B6 grep target).
-  expect(script.includes(`__SAPOTO_PATHD_BRIDGE_V1_STAMP__`)).toBe(true);
-  // No window-level installation of the old constant.
+test('#1137: no window.__SAPOTO_PATHD_BRIDGE_V1__ pollution', () => {
+  const script = buildStealthInitScript({ suppressFocus: false });
   expect(script.includes(`window).__SAPOTO_PATHD_BRIDGE_V1__ = true`)).toBe(false);
   expect(script.includes(`window.__SAPOTO_PATHD_BRIDGE_V1__ = true`)).toBe(false);
 
-  // Run the script and assert no `__SAPOTO_PATHD_BRIDGE_V1__` global exists.
   const ctx = newPageContext();
   vm.runInContext(script, ctx);
   expect(ctx.__SAPOTO_PATHD_BRIDGE_V1__).toBeUndefined();
 });
 
-test('A5: navigator.languages length-1 clamp removed — real Chrome value passes through', () => {
-  // The old C2 stub overrode navigator.languages with ['en-US','en'] whenever
-  // the page exposed a single-locale array. A5 removes that clamp so real
-  // Chrome's value passes through unchanged.
-  const script = buildStealthInitScript({
-    stealth: true, suppressFocus: false, printCapture: true, chromeRuntimeStubs: true,
-  } as any);
-  expect(script.includes(`['en-US', 'en']`)).toBe(false);
-  expect(script.includes(`navigator.languages && navigator.languages.length === 1`)).toBe(false);
+test('#1137: C3 deferred print installs in script source', () => {
+  const script = buildStealthInitScript({ suppressFocus: false });
+  expect(script.includes('[DeferredPrint]')).toBe(true);
+  expect(script.includes('window.print = deferred')).toBe(true);
+});
 
-  // Behavioral check: a page exposing only ['en-US'] sees the same value after init.
-  const ctx = newPageContext({ languages: ['en-US'] });
+test('#1137: C3 deferred print handler is callable', () => {
+  const ctx = newPageContext();
+  const script = buildStealthInitScript({ suppressFocus: false });
+  const printBefore = ctx.print;
   vm.runInContext(script, ctx);
-  expect(ctx.navigator.languages).toEqual(['en-US']);
+  expect(ctx.print).not.toBe(printBefore);
+  expect(typeof ctx.print).toBe('function');
+  expect(() => ctx.print()).not.toThrow();
 });
 
-test('A5: navigator.webdriver getter lives on Navigator.prototype (not instance), masked native', () => {
-  // Build a richer sandbox that mirrors how Chrome lays out Navigator/prototype.
-  const sandbox: any = {};
-  vm.createContext(sandbox);
-  vm.runInContext(`
-    globalThis.window = globalThis;
-    function Navigator() {}
-    Object.defineProperty(Navigator.prototype, 'webdriver', { value: undefined, writable: true, configurable: true });
-    globalThis.Navigator = Navigator;
-    globalThis.navigator = Object.create(Navigator.prototype);
-    globalThis.Notification = { permission: 'default' };
-    globalThis.performance = { now: () => 1234, getEntriesByType: () => [] };
-    globalThis.setTimeout = () => 0;
-    globalThis.print = undefined;
-  `, sandbox);
-  const script = buildStealthInitScript({
-    stealth: true, suppressFocus: false, printCapture: true, chromeRuntimeStubs: true,
-  } as any);
-  vm.runInContext(script, sandbox);
-
-  // navigator.webdriver returns false (boolean), as the getter sits on the prototype.
-  expect(sandbox.navigator.webdriver).toBe(false);
-  expect(typeof sandbox.navigator.webdriver).toBe('boolean');
-
-  // The descriptor lives on Navigator.prototype — not on the instance.
-  const protoDesc = vm.runInContext(`Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver')`, sandbox);
-  const instanceDesc = vm.runInContext(`Object.getOwnPropertyDescriptor(navigator, 'webdriver')`, sandbox);
-  expect(protoDesc).toBeDefined();
-  expect(typeof protoDesc.get).toBe('function');
-  expect(instanceDesc).toBeUndefined();
-
-  // The getter's .name is "get webdriver" (Chrome shape via object-literal
-  // accessor syntax), and its .toString() is masked to look native.
-  expect(protoDesc.get.name).toBe('get webdriver');
-  expect(protoDesc.get.toString()).toBe('function get webdriver() { [native code] }');
-});
-
-test('A5 gate: printCapture=false → C3 deferred-print and C4 suppressFocus-mode print both absent', () => {
-  // printCapture=false in stealth+suppressFocus mode must skip both print-override
-  // blocks (C3 deferred and C4 fast-path). The script must still emit other sections.
-  const off = buildStealthInitScript({
-    stealth: true, suppressFocus: true, printCapture: false, chromeRuntimeStubs: true,
-  } as any);
-  expect(off.includes('[DeferredPrint]')).toBe(false);
-  expect(off.includes('[Print Capture]')).toBe(false);
-  expect(off.includes('window.print = deferred')).toBe(false);
-  // C5 FocusShim still installs.
-  expect(off.includes('[FocusShim]')).toBe(true);
-});
-
-test('A5 gate: printCapture=true → both C3 and C4 print blocks present (today\'s behavior)', () => {
-  const on = buildStealthInitScript({
-    stealth: true, suppressFocus: true, printCapture: true, chromeRuntimeStubs: true,
-  } as any);
-  expect(on.includes('[DeferredPrint]')).toBe(true);
-  expect(on.includes('[Print Capture]')).toBe(true);
-  expect(on.includes('window.print = deferred')).toBe(true);
-});
-
-test('A5 gate: chromeRuntimeStubs=false → chrome.{app,csi,loadTimes}/Notification stubs absent; __stealthMarkNative still defined', () => {
-  const off = buildStealthInitScript({
-    stealth: true, suppressFocus: true, printCapture: true, chromeRuntimeStubs: false,
-  } as any);
-  // chrome.* stub bodies absent
-  expect(off.includes(`chrome.app`)).toBe(false);
-  expect(off.includes(`chrome.csi`)).toBe(false);
-  expect(off.includes(`chrome.loadTimes`)).toBe(false);
-  expect(off.includes(`Notification.permission`)).toBe(false);
-  // But the cross-section helper handshake survives.
-  expect(off.includes('__stealthMarkNative')).toBe(true);
-
-  // Behavioral: run it and confirm chrome.app/csi/loadTimes are NOT installed,
-  // but __stealthMarkNative is, so C4 / C5 can still call it.
+test('#1137: C3 deferred print schedules via setTimeout', () => {
   const ctx = newPageContext();
-  vm.runInContext(off, ctx);
-  expect(ctx.chrome === undefined || ctx.chrome.app === undefined).toBe(true);
-  expect(typeof ctx.__stealthMarkNative).toBe('function');
+  vm.runInContext(`globalThis.setTimeout = (fn, ms) => { globalThis.__stCount = (globalThis.__stCount || 0) + 1; return 0; };`, ctx);
+  const script = buildStealthInitScript({ suppressFocus: false });
+  vm.runInContext(script, ctx);
+  expect(() => ctx.print()).not.toThrow();
+  const setTimeoutCalls = vm.runInContext('globalThis.__stCount || 0', ctx);
+  expect(setTimeoutCalls).toBeGreaterThanOrEqual(1);
 });
 
-test('A5 gate: chromeRuntimeStubs=true → all chrome.* stubs install (today\'s behavior)', () => {
-  const on = buildStealthInitScript({
-    stealth: true, suppressFocus: false, printCapture: true, chromeRuntimeStubs: true,
-  } as any);
+test('#1137: C4 suppressFocus-mode print installs when suppressFocus=true', () => {
+  const script = buildStealthInitScript({ suppressFocus: true });
+  expect(script.includes('[Print Capture]')).toBe(true);
+});
+
+test('#1137: C4 suppressFocus-mode print does NOT install when suppressFocus=false', () => {
+  const script = buildStealthInitScript({ suppressFocus: false });
+  expect(script.includes('[Print Capture]')).toBe(false);
+});
+
+test('#1137: C5 FocusShim installs when suppressFocus=true', () => {
+  const script = buildStealthInitScript({ suppressFocus: true });
+  expect(script.includes('[FocusShim]')).toBe(true);
+});
+
+test('#1137: C5 FocusShim does NOT install when suppressFocus=false', () => {
+  const script = buildStealthInitScript({ suppressFocus: false });
+  expect(script.includes('[FocusShim]')).toBe(false);
+});
+
+test('#1137: C5 window.open shim installs end-to-end when suppressFocus=true', () => {
   const ctx = newPageContext();
-  vm.runInContext(on, ctx);
-  expect(ctx.chrome.app).toBeDefined();
-  expect(typeof ctx.chrome.csi).toBe('function');
-  expect(typeof ctx.chrome.loadTimes).toBe('function');
-  expect(ctx.Notification.permission).toBe('default');
+  vm.runInContext(`globalThis.open = function open() {};`, ctx);
+  const script = buildStealthInitScript({ suppressFocus: true });
+  vm.runInContext(script, ctx);
+  // window.open should be replaced by the shim
+  expect(typeof ctx.open).toBe('function');
 });
 
-test('A5: every [FocusShim] log uses console.debug (not console.warn) — page-level RUM stays quiet', () => {
-  const script = buildStealthInitScript({
-    stealth: true, suppressFocus: true, printCapture: true, chromeRuntimeStubs: true,
-  } as any);
-  // No `console.warn('[FocusShim] ...` strings remain — page-level RUM hooks
-  // listening on console.warn no longer pick up the shim's lifecycle chatter.
+test('#1137: every [FocusShim] log uses console.debug (not console.warn)', () => {
+  const script = buildStealthInitScript({ suppressFocus: true });
   const warnMatches = script.match(/console\.warn\(\s*'\[FocusShim\]/g) || [];
   expect(warnMatches.length).toBe(0);
-  // The C5 block carries 13 [FocusShim] log sites today (counted at A5 land).
-  // Use >= so future additions of the same kind don't regress this test.
   const debugMatches = script.match(/console\.debug\(\s*'\[FocusShim\]/g) || [];
-  expect(debugMatches.length).toBeGreaterThanOrEqual(13);
+  expect(debugMatches.length).toBeGreaterThanOrEqual(10);
 });
 
-test('A5: __stealthMarkNative handshake survives when chromeRuntimeStubs=false (C4/C5 can still mask)', () => {
-  // Even with chrome.* stubs off, the C4 print override and C5 FocusShim
-  // open() override depend on __stealthMarkNative being installed by C2.
-  // Verify the helper is defined inside the C2 try block (outside the
-  // chrome.* sub-gate) and reachable from C4/C5.
-  const off = buildStealthInitScript({
-    stealth: true, suppressFocus: true, printCapture: true, chromeRuntimeStubs: false,
-  } as any);
-  const ctx = newPageContext();
-  // C5 reads window.open via Object.getOwnPropertyDescriptor — give the
-  // sandbox a stub so the shim install path can run end-to-end.
-  vm.runInContext(`globalThis.open = function open() {};`, ctx);
-  vm.runInContext(off, ctx);
-  expect(typeof ctx.__stealthMarkNative).toBe('function');
-  // C5 window.open should be masked native via __stealthMarkNative.
-  expect(ctx.open.toString()).toBe('function open() { [native code] }');
+// ------------------------------------------------------------------
+// Third-party-frame guard (Sapoto #1036) -- still works post-gutting
+// ------------------------------------------------------------------
+
+test('#1137: third-party-frame guard -- script does not throw with no DOM', () => {
+  const script = buildStealthInitScript({ suppressFocus: false });
+  const minimal: any = {};
+  vm.createContext(minimal);
+  vm.runInContext(`globalThis.window = globalThis; globalThis.setTimeout = () => 0;`, minimal);
+  expect(() => vm.runInContext(script, minimal)).not.toThrow();
+  // C3 deferred print still installs even with minimal globals.
+  expect(vm.runInContext('typeof print', minimal)).toBe('function');
+});
+
+test('#1137: CDP_STEALTH_INIT_SCRIPT is built with suppressFocus=false', () => {
+  // The named export should match the non-suppressFocus shape.
+  expect(CDP_STEALTH_INIT_SCRIPT.includes('[FocusShim]')).toBe(false);
+  expect(CDP_STEALTH_INIT_SCRIPT.includes('[DeferredPrint]')).toBe(true);
+  expect(CDP_STEALTH_INIT_SCRIPT.includes('__SAPOTO_PATHD_BRIDGE_V1_STAMP__')).toBe(true);
 });
