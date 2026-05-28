@@ -15,9 +15,9 @@
  */
 
 import { Option as ProgramOption } from 'commander';
+import { parseCdpStealthCLI } from '@isomorphic/cdpStealthCLIParser';
 import * as mcpServer from '../utils/mcp/server';
 import { commaSeparatedList, dotenvFileLoader, enumParser, headerParser, numberParser, resolutionParser, resolveCLIConfigForMCP, semicolonSeparatedList } from './config';
-import { parseCdpStealthCLI } from '@isomorphic/cdpStealthCLIParser';
 import { setupExitWatchdog } from './watchdog';
 import { createBrowserWithInfo } from './browserFactory';
 import { BrowserBackend } from '../backend/browserBackend';

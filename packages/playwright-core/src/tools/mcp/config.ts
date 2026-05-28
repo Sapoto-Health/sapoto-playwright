@@ -19,10 +19,10 @@ import path from 'path';
 import os from 'os';
 
 import dotenv from 'dotenv';
+import { CDP_STEALTH_CLI_FEATURES, parseCdpStealthCLI } from '@isomorphic/cdpStealthCLIParser';
 import { isSystemDirectory } from '@utils/fileUtils';
 import { playwright } from '../../inprocess';
 import { configFromIniFile } from './configIni';
-import { CDP_STEALTH_CLI_FEATURES, parseCdpStealthCLI } from '@isomorphic/cdpStealthCLIParser';
 
 import type * as playwrightTypes from '../../..';
 import type { Config, ToolCapability } from './config.d';
