@@ -77,7 +77,7 @@ A page cannot directly inspect the CDP WebSocket. CDP side effects are detectabl
 
 Detection scripts can emit `console` calls with crafted objects and measure whether automation-side observers cause extra property access, serialization, or timing shifts compared to a browser with no CDP client attached.
 
-**Fork implementation:** `crPage.ts` can skip `Log.enable`. `stealthInitScript.ts` uses console markers for print capture and background-open capture.
+**Fork implementation:** `crPage.ts` can skip `Log.enable`. `captureBridgeInitScript.ts` uses console markers for print capture and background-open capture.
 
 **Rule:** Do not use `console` as an automation bridge unless it is portal-scoped and operationally necessary. Console markers are page-visible behavior; anti-bot JS can observe them.
 
@@ -93,7 +93,7 @@ Playwright creates utility worlds to run internal code in isolation from page sc
 
 `Page.addScriptToEvaluateOnNewDocument` runs scripts before page code executes. This is powerful and risky: it changes startup ordering and can create main-world mutations observable by vendor JS that runs immediately.
 
-**Fork implementation:** The MCP context layer (`packages/playwright-core/src/tools/backend/context.ts`) injects the stealth script. Chromium evaluates init scripts with `runImmediately` in `crPage.ts`.
+**Fork implementation:** The MCP context layer (`packages/playwright-core/src/tools/backend/context.ts`) injects the capture bridge init script. Chromium evaluates init scripts with `runImmediately` in `crPage.ts`.
 
 **Rule:** Init scripts must be minimal and deterministic. They should not mutate built-in prototypes unless there is no alternative. When they must, the result must be validated against real Chrome in same-origin iframes, popups, and reloads.
 
@@ -131,7 +131,7 @@ Changes to the fork are classified by their detection risk profile:
 |---|---|---|---|---|
 | **Green** | Launch-level | Removal or suppression of automation-exposed state via Chrome launch flags and configuration, where the result matches real Chrome behavior | `chromiumSwitches.ts`: removing `--enable-automation`, `AutomationControlled` | Preferred approach. Low detection risk when the resulting browser state is indistinguishable from stock Chrome. |
 | **Yellow** | CDP-level | Changes to CDP domain behavior: gating, cycling, or suppressing CDP commands and their side effects | Runtime cycling, Log.enable skip, UA-CH override via `crPage.ts` and `cdpStealthGates.ts` | Acceptable with caution. Must be version-tested against target Chromium builds. Side effects may shift between Chrome releases. |
-| **Red** | JS-level | Main-world monkey-patches that modify built-in prototypes, constructors, or globals | `Function.prototype.toString` override, `navigator.webdriver` getter, `chrome` object stubs, `window.print` shim, `window.open` shim in `stealthInitScript.ts` | Last resort only. Must be opt-in, narrowly scoped, and justified by a documented portal-specific gap. Each patch is a new fingerprint surface. |
+| **Red** | JS-level | Main-world monkey-patches that modify built-in prototypes, constructors, or globals | `window.print` shim, `window.open` shim in `captureBridgeInitScript.ts`. Red-tier patches previously included `Function.prototype.toString` override, `navigator.webdriver` getter, and `chrome` object stubs — all removed by the stealth redo (see `docs/stealth-redo-decisions.md`). | Last resort only. Must be opt-in, narrowly scoped, and justified by a documented portal-specific gap. Each patch is a new fingerprint surface. |
 
 ---
 
@@ -198,13 +198,14 @@ Every stealth-related test should:
 | `packages/playwright-core/src/server/chromium/crServiceWorker.ts` | Service worker stealth logic |
 | `packages/playwright-core/src/server/chromium/chromiumSwitches.ts` | Launch flag removal (AutomationControlled, enable-automation) |
 | `packages/playwright-core/src/server/chromium/chromeUaBrands.ts` | UA-CH brand list construction |
-| `packages/playwright-core/src/tools/backend/stealthInitScript.ts` | Main-world JS patches (webdriver, chrome stubs, print capture, focus shim, background-open capture) |
-| `packages/playwright-core/src/tools/backend/context.ts` | MCP context layer; injects stealth init script |
+| `packages/playwright-core/src/tools/backend/captureBridgeInitScript.ts` | Operational capture bridge: `window.print` shim (print capture), `window.open` shim (background-open capture), focus shim. Red-tier stealth patches (webdriver getter, chrome stubs, `Function.prototype.toString`) were removed by the stealth redo. |
+| `packages/playwright-core/src/tools/backend/context.ts` | MCP context layer; injects capture bridge init script |
 | `packages/playwright-core/src/server/cdpStealth.ts` | CDP stealth coordination |
 | `packages/playwright-core/src/server/page.ts` | Binding machinery (global leak risk surface) |
 | `packages/playwright-core/src/server/browserContext.ts` | Context-level binding installation |
 | `packages/isomorphic/cdpStealthCLIParser.ts` | CLI flag parsing for `--cdp-stealth` and boolean gates |
 | `packages/isomorphic/cdpStealthAlias.ts` | Stealth gate alias resolution |
+| `docs/stealth-redo-decisions.md` | Decision record for the stealth redo: rationale for removing Red-tier patches (C1-C6), dropping `chromeRuntimeStubs`, and other first-principles cleanup |
 | `tests/library/cdp-stealth-gates.spec.ts` | Gate behavior tests |
 | `tests/library/cdp-stealth-options.spec.ts` | CLI option parsing tests |
 | `tests/library/stealth-stubs.spec.ts` | Global leak and stub correctness tests |
