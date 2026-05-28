@@ -51,6 +51,7 @@ export class CRBrowser extends Browser {
   private _version = '';
   private _majorVersion = 0;
   _revision = '';
+  _isConnectedOverCDP: boolean = false;
 
   private _tracingRecording = false;
   private _tracingClient: CRSession | undefined;
