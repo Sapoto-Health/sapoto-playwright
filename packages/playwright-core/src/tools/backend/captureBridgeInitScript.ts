@@ -480,19 +480,20 @@ export function buildCaptureBridgeInitScript(options: CaptureBridgeInitScriptOpt
       return _nativeOpen(url, target, features);
     };
 
-    // Install with Object.defineProperty(writable:false, configurable:false)
+    // Install with Object.defineProperty(writable:false, configurable:true)
     // so subsequent assignments (or Fidelity-style late wrap attempts) fail
     // silently in sloppy mode / throw in strict mode, but cannot replace ours.
+    // configurable:true matches stock Chrome's descriptor for window.open.
     try {
       Object.defineProperty(window, 'open', {
         value: _shimOpen,
         writable: false,
-        configurable: false,
+        configurable: true,
         enumerable: true,
       });
     } catch (_) {
       // Fallback: plain assignment. Some hardened browsers may reject
-      // configurable:false on built-ins; we accept the override risk.
+      // defineProperty on built-ins; we accept the override risk.
       try { console.debug('[FocusShim] defineProperty failed, falling back to assignment'); } catch (_) {}
       try { (window).open = _shimOpen; } catch (_) { /* really stuck */ }
     }
