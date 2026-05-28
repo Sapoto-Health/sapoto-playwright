@@ -184,18 +184,6 @@ function callShimOpen(ctx: ShimSandbox, url: any, target?: any, features?: any) 
       ctx);
 }
 
-// Drain a pending fetch by resolving or rejecting it, then let microtasks settle.
-async function resolveFetch(ctx: ShimSandbox, index: number, response: { ok: boolean; status?: number } | null) {
-  const slot = ctx.__fetchResolves[index];
-  if (!slot) throw new Error(`No fetch slot at index ${index}`);
-  if (response === null)
-    slot.reject(new Error('network error'));
-  else
-    slot.resolve(response);
-  // Let the .then/.catch chain run.
-  await new Promise(r => setImmediate(r));
-  await new Promise(r => setImmediate(r));
-}
 
 // ------------------------------------------------------------------
 // suppressFocus=false: C5 must NOT install
@@ -243,7 +231,7 @@ test('suppressFocus=true installs C5 FocusShim (chrome-mode shape post-#1137)', 
   // appear and window.open must be a shim.
   const ctx = newShimContext();
   const nativeOpen = ctx.open;
-  installShim(ctx, /*suppressFocus*/ true);
+  installShim(ctx, /* suppressFocus */ true);
 
   // FocusShim install marker fired.
   expect(ctx.__warnings.some((w: string) => w.startsWith('[FocusShim] installed at'))).toBe(true);
