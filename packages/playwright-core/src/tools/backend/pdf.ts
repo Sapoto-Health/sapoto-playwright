@@ -44,7 +44,7 @@ const pdf = defineTabTool({
 
 // Path D — issue #1006. This tool invokes window.print() inside the page so the
 // Sapoto stealth init script's C3/C4 deferred-print bridge (see
-// stealthInitScript.ts) can intercept and route the print event to the Electron
+// captureBridgeInitScript.ts) can intercept and route the print event to the Electron
 // host via window.electronAPI.requestPrintCapture. The PDF is captured
 // asynchronously on the main-process side (printCaptureHandler.ts); this tool
 // only fires the in-page event and returns immediately. This is intentionally
@@ -68,7 +68,7 @@ const triggerPrint = defineTabTool({
     // and produces a PDF in the Electron host. Without it, window.print() either
     // pops the native OS dialog (chrome-direct, no stealth init script wired) or
     // no-ops in headless. The chrome-direct path can ALSO be served by the C4
-    // stealthInitScript `[Print Capture]` marker route, but that path is wired
+    // captureBridgeInitScript `[Print Capture]` marker route, but that path is wired
     // outside the page (Sapoto's printCapture.ts main-process listener) and we
     // can't detect it from here. So we report two states honestly: Electron
     // bridge present (capture is guaranteed) vs not (capture path is

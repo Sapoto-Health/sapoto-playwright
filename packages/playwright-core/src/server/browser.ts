@@ -74,7 +74,7 @@ export type BrowserOptions = {
   cdpStealth: Set<CdpStealthFeature>;
   // Sapoto PRD #1045 / Tracer A1: type-only plumbing for the three new
   // booleans. A5 owns the gating decomposition that consumes them inside
-  // stealthInitScript.ts; A1 just lands the field.
+  // captureBridgeInitScript.ts; A1 just lands the field.
   printCapture: boolean;
   chromeRuntimeStubs: boolean;
   focusEmulation: boolean;

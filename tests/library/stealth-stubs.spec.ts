@@ -23,20 +23,20 @@
  *      list from a browser version string. Validates the three-entry shape and
  *      the version-derivation logic without spinning up Chromium.
  *
- *   2. CDP_STEALTH_INIT_SCRIPT / buildStealthInitScript() -- the operational
- *      init script source. Red-tier JS stealth patches (C1 webdriver, C2
- *      Function.prototype.toString masking, chrome.* stubs, Notification clamp)
- *      were removed by Tracer #1137. Only C3 (deferred print), C4 (suppressFocus
- *      print), C5 (window.open shim), sanitizeUrl, and Path D stamp remain.
- *      Tests evaluate the script inside a Node `vm` context with a hand-rolled
- *      DOM-ish stand-in.
+ *   2. CDP_CAPTURE_BRIDGE_INIT_SCRIPT / buildCaptureBridgeInitScript() -- the
+ *      operational init script source. Red-tier JS stealth patches (C1
+ *      webdriver, C2 Function.prototype.toString masking, chrome.* stubs,
+ *      Notification clamp) were removed by Tracer #1137. Only C3 (deferred
+ *      print), C4 (suppressFocus print), C5 (window.open shim), sanitizeUrl,
+ *      and Path D stamp remain. Tests evaluate the script inside a Node `vm`
+ *      context with a hand-rolled DOM-ish stand-in.
  */
 
 import vm from 'vm';
 
 import { test, expect } from '@playwright/test';
 import { buildChromeBrands } from '../../packages/playwright-core/src/server/chromium/chromeUaBrands';
-import { CDP_STEALTH_INIT_SCRIPT, buildStealthInitScript } from '../../packages/playwright-core/src/tools/backend/stealthInitScript';
+import { CDP_CAPTURE_BRIDGE_INIT_SCRIPT, buildCaptureBridgeInitScript } from '../../packages/playwright-core/src/tools/backend/captureBridgeInitScript';
 
 // ------------------------------------------------------------------
 // buildChromeBrands -- pure helper
@@ -69,7 +69,7 @@ test('buildChromeBrands returns undefined on empty input', () => {
 });
 
 // ------------------------------------------------------------------
-// CDP_STEALTH_INIT_SCRIPT -- evaluate in a sandboxed VM context
+// CDP_CAPTURE_BRIDGE_INIT_SCRIPT -- evaluate in a sandboxed VM context
 // ------------------------------------------------------------------
 
 /**
@@ -94,7 +94,7 @@ function newPageContext() {
 
 test('#1137: navigator.webdriver getter is NOT installed (removed by D2)', () => {
   const ctx = newPageContext();
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   vm.runInContext(script, ctx);
   // navigator.webdriver should remain at its initial value (true) since
   // the C1 override was removed.
@@ -102,39 +102,39 @@ test('#1137: navigator.webdriver getter is NOT installed (removed by D2)', () =>
 });
 
 test('#1137: __chromeStealth guard is removed (D1)', () => {
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   expect(script.includes('__chromeStealth')).toBe(false);
 });
 
 test('#1137: __stealthMarkNative global is removed (D1)', () => {
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   expect(script.includes('__stealthMarkNative')).toBe(false);
 });
 
 test('#1137: Function.prototype.toString masking is removed (D3b)', () => {
-  const script = buildStealthInitScript({ suppressFocus: true });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: true });
   expect(script.includes('Function.prototype.toString')).toBe(false);
   expect(script.includes('_nativeMap')).toBe(false);
   expect(script.includes('_markNative')).toBe(false);
 });
 
 test('#1137: chrome.app / chrome.csi / chrome.loadTimes stubs are removed (D3b)', () => {
-  const script = buildStealthInitScript({ suppressFocus: true });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: true });
   expect(script.includes('chrome.app')).toBe(false);
   expect(script.includes('chrome.csi')).toBe(false);
   expect(script.includes('chrome.loadTimes')).toBe(false);
 });
 
 test('#1137: Notification.permission clamp is removed (D3b)', () => {
-  const script = buildStealthInitScript({ suppressFocus: true });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: true });
   expect(script.includes('Notification.permission')).toBe(false);
   expect(script.includes('Notification')).toBe(false);
 });
 
-test('#1137: stealth option is removed from StealthInitScriptOptions (D5)', () => {
+test('#1137: stealth option is removed from CaptureBridgeInitScriptOptions (D5)', () => {
   // TypeScript compile-time check: passing `stealth` should not be accepted.
   // At runtime, the function only reads `suppressFocus`.
-  const script = buildStealthInitScript({ suppressFocus: false } as any);
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false } as any);
   expect(script).toBeDefined();
   // No conditional blocks gated on removed options remain.
   expect(script.includes('chromeRuntimeStubs')).toBe(false);
@@ -147,17 +147,17 @@ test('#1137: stealth option is removed from StealthInitScriptOptions (D5)', () =
 // ------------------------------------------------------------------
 
 test('#1137: sanitizeUrl helper is still present', () => {
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   expect(script.includes('sanitizeUrl')).toBe(true);
 });
 
 test('#1137: Path D stamp is still present', () => {
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   expect(script.includes('__SAPOTO_PATHD_BRIDGE_V1_STAMP__')).toBe(true);
 });
 
 test('#1137: no window.__SAPOTO_PATHD_BRIDGE_V1__ pollution', () => {
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   expect(script.includes(`window).__SAPOTO_PATHD_BRIDGE_V1__ = true`)).toBe(false);
   expect(script.includes(`window.__SAPOTO_PATHD_BRIDGE_V1__ = true`)).toBe(false);
 
@@ -167,14 +167,14 @@ test('#1137: no window.__SAPOTO_PATHD_BRIDGE_V1__ pollution', () => {
 });
 
 test('#1137: C3 deferred print installs in script source', () => {
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   expect(script.includes('[DeferredPrint]')).toBe(true);
   expect(script.includes('window.print = deferred')).toBe(true);
 });
 
 test('#1137: C3 deferred print handler is callable', () => {
   const ctx = newPageContext();
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   const printBefore = ctx.print;
   vm.runInContext(script, ctx);
   expect(ctx.print).not.toBe(printBefore);
@@ -185,7 +185,7 @@ test('#1137: C3 deferred print handler is callable', () => {
 test('#1137: C3 deferred print schedules via setTimeout', () => {
   const ctx = newPageContext();
   vm.runInContext(`globalThis.setTimeout = (fn, ms) => { globalThis.__stCount = (globalThis.__stCount || 0) + 1; return 0; };`, ctx);
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   vm.runInContext(script, ctx);
   expect(() => ctx.print()).not.toThrow();
   const setTimeoutCalls = vm.runInContext('globalThis.__stCount || 0', ctx);
@@ -193,36 +193,36 @@ test('#1137: C3 deferred print schedules via setTimeout', () => {
 });
 
 test('#1137: C4 suppressFocus-mode print installs when suppressFocus=true', () => {
-  const script = buildStealthInitScript({ suppressFocus: true });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: true });
   expect(script.includes('[Print Capture]')).toBe(true);
 });
 
 test('#1137: C4 suppressFocus-mode print does NOT install when suppressFocus=false', () => {
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   expect(script.includes('[Print Capture]')).toBe(false);
 });
 
 test('#1137: C5 FocusShim installs when suppressFocus=true', () => {
-  const script = buildStealthInitScript({ suppressFocus: true });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: true });
   expect(script.includes('[FocusShim]')).toBe(true);
 });
 
 test('#1137: C5 FocusShim does NOT install when suppressFocus=false', () => {
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   expect(script.includes('[FocusShim]')).toBe(false);
 });
 
 test('#1137: C5 window.open shim installs end-to-end when suppressFocus=true', () => {
   const ctx = newPageContext();
   vm.runInContext(`globalThis.open = function open() {};`, ctx);
-  const script = buildStealthInitScript({ suppressFocus: true });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: true });
   vm.runInContext(script, ctx);
   // window.open should be replaced by the shim
   expect(typeof ctx.open).toBe('function');
 });
 
 test('#1137: every [FocusShim] log uses console.debug (not console.warn)', () => {
-  const script = buildStealthInitScript({ suppressFocus: true });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: true });
   const warnMatches = script.match(/console\.warn\(\s*'\[FocusShim\]/g) || [];
   expect(warnMatches.length).toBe(0);
   const debugMatches = script.match(/console\.debug\(\s*'\[FocusShim\]/g) || [];
@@ -234,7 +234,7 @@ test('#1137: every [FocusShim] log uses console.debug (not console.warn)', () =>
 // ------------------------------------------------------------------
 
 test('#1137: third-party-frame guard -- script does not throw with no DOM', () => {
-  const script = buildStealthInitScript({ suppressFocus: false });
+  const script = buildCaptureBridgeInitScript({ suppressFocus: false });
   const minimal: any = {};
   vm.createContext(minimal);
   vm.runInContext(`globalThis.window = globalThis; globalThis.setTimeout = () => 0;`, minimal);
@@ -243,9 +243,9 @@ test('#1137: third-party-frame guard -- script does not throw with no DOM', () =
   expect(vm.runInContext('typeof print', minimal)).toBe('function');
 });
 
-test('#1137: CDP_STEALTH_INIT_SCRIPT is built with suppressFocus=false', () => {
+test('#1137: CDP_CAPTURE_BRIDGE_INIT_SCRIPT is built with suppressFocus=false', () => {
   // The named export should match the non-suppressFocus shape.
-  expect(CDP_STEALTH_INIT_SCRIPT.includes('[FocusShim]')).toBe(false);
-  expect(CDP_STEALTH_INIT_SCRIPT.includes('[DeferredPrint]')).toBe(true);
-  expect(CDP_STEALTH_INIT_SCRIPT.includes('__SAPOTO_PATHD_BRIDGE_V1_STAMP__')).toBe(true);
+  expect(CDP_CAPTURE_BRIDGE_INIT_SCRIPT.includes('[FocusShim]')).toBe(false);
+  expect(CDP_CAPTURE_BRIDGE_INIT_SCRIPT.includes('[DeferredPrint]')).toBe(true);
+  expect(CDP_CAPTURE_BRIDGE_INIT_SCRIPT.includes('__SAPOTO_PATHD_BRIDGE_V1_STAMP__')).toBe(true);
 });

@@ -90,7 +90,7 @@ export class CRNetworkManager {
     // and the browser_network_requests tool by default — and the self-healing path only
     // re-enabled Network when Fetch.enable flipped on (i.e., when interception came up),
     // not when a plain request listener was registered. The fingerprint surface stealth
-    // was trying to minimize is handled by stealthInitScript.ts (DOM/Runtime stubs);
+    // was trying to minimize is handled by captureBridgeInitScript.ts (DOM/Runtime stubs);
     // skipping Network.enable was overreach.
     await Promise.all([
       session.send('Network.enable'),

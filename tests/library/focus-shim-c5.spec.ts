@@ -16,7 +16,7 @@
  * --------------------------------------------------------------------------
  * FocusShim C5 — window.open focus-steal shim (Sapoto #1036, refactor #1043, #1044)
  *
- * The C5 block in `packages/playwright-core/src/tools/backend/stealthInitScript.ts`
+ * The C5 block in `packages/playwright-core/src/tools/backend/captureBridgeInitScript.ts`
  * replaces `window.open` when `suppressFocus: true`. Behavior matrix the shim
  * must hold (per the block's header comment):
  *
@@ -37,7 +37,7 @@
  *
  * Plus: with suppressFocus=false the entire C4+C5 block is omitted from the
  * script source (the IIFE only emits C4+C5 when the flag is set), so the
- * production `CDP_STEALTH_INIT_SCRIPT` constant must NOT contain the C5
+ * production `CDP_CAPTURE_BRIDGE_INIT_SCRIPT` constant must NOT contain the C5
  * install marker.
  *
  * Approach: this file mirrors `stealth-stubs.spec.ts` — we evaluate the script
@@ -51,9 +51,9 @@ import vm from 'vm';
 
 import { test, expect } from '@playwright/test';
 import {
-  buildStealthInitScript,
-  CDP_STEALTH_INIT_SCRIPT,
-} from '../../packages/playwright-core/src/tools/backend/stealthInitScript';
+  buildCaptureBridgeInitScript,
+  CDP_CAPTURE_BRIDGE_INIT_SCRIPT,
+} from '../../packages/playwright-core/src/tools/backend/captureBridgeInitScript';
 
 // ------------------------------------------------------------------
 // Sandbox helpers
@@ -171,7 +171,7 @@ function newShimContext(opts: { electronBridge?: 'real' | 'truthy-but-not-fn' | 
 }
 
 function installShim(ctx: ShimSandbox, suppressFocus: boolean) {
-  vm.runInContext(buildStealthInitScript({ suppressFocus }), ctx);
+  vm.runInContext(buildCaptureBridgeInitScript({ suppressFocus }), ctx);
 }
 
 function callShimOpen(ctx: ShimSandbox, url: any, target?: any, features?: any) {
@@ -194,9 +194,9 @@ test('C5 omitted from script source when suppressFocus=false', () => {
   // are gated behind the `${suppressFocus ? ... : ''}` template literal,
   // so neither the C5 install marker nor any of the FocusShim helpers
   // should appear in the source.
-  expect(CDP_STEALTH_INIT_SCRIPT).not.toContain('[FocusShim] installed');
-  expect(CDP_STEALTH_INIT_SCRIPT).not.toContain('DOWNLOAD_URL_RE');
-  expect(CDP_STEALTH_INIT_SCRIPT).not.toContain('_printCaptureProxy');
+  expect(CDP_CAPTURE_BRIDGE_INIT_SCRIPT).not.toContain('[FocusShim] installed');
+  expect(CDP_CAPTURE_BRIDGE_INIT_SCRIPT).not.toContain('DOWNLOAD_URL_RE');
+  expect(CDP_CAPTURE_BRIDGE_INIT_SCRIPT).not.toContain('_printCaptureProxy');
 });
 
 test('suppressFocus=false leaves window.open untouched (no shim runs)', () => {

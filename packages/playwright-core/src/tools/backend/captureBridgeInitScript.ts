@@ -57,7 +57,7 @@
  * cannot abort the remaining sections.
  */
 
-export type StealthInitScriptOptions = {
+export type CaptureBridgeInitScriptOptions = {
   /**
    * When true, install the deferred window.print() + Path D srcdoc-iframe
    * bridge (C3), the suppressFocus-mode print override (C4), and the
@@ -86,7 +86,7 @@ export type StealthInitScriptOptions = {
  * `window`. Coordinate any rename with `scripts/prepare-mcp-assets.js`
  * (parallel tracer B6).
  */
-export function buildStealthInitScript(options: StealthInitScriptOptions): string {
+export function buildCaptureBridgeInitScript(options: CaptureBridgeInitScriptOptions): string {
   const suppressFocus = !!options.suppressFocus;
   return `(() => {
   // Path D (Sapoto #1006) backward-compat detection stamp. The Sapoto build
@@ -517,4 +517,4 @@ export function buildStealthInitScript(options: StealthInitScriptOptions): strin
  * constant directly) keep working without passing options. This is the
  * "C3 deferred print only, no FocusShim" form.
  */
-export const CDP_STEALTH_INIT_SCRIPT = buildStealthInitScript({ suppressFocus: false });
+export const CDP_CAPTURE_BRIDGE_INIT_SCRIPT = buildCaptureBridgeInitScript({ suppressFocus: false });

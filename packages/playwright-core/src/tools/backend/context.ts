@@ -26,7 +26,7 @@ import { isPathInside, isSystemDirectory, isWritable } from '@utils/fileUtils';
 import { playwright } from '../../inprocess';
 
 import { Tab } from './tab';
-import { buildStealthInitScript } from './stealthInitScript';
+import { buildCaptureBridgeInitScript } from './captureBridgeInitScript';
 
 import type * as playwrightTypes from '../../..';
 import type { SessionLog } from './sessionLog';
@@ -443,7 +443,7 @@ export class Context {
     const suppressFocus = !!this.config.suppressFocus;
     if (suppressFocus) {
       this._disposables.push(await browserContext.addInitScript(
-          buildStealthInitScript({ suppressFocus })));
+          buildCaptureBridgeInitScript({ suppressFocus })));
     }
 
     for (const page of browserContext.pages()) {
