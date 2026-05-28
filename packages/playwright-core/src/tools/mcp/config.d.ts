@@ -327,7 +327,7 @@ export type Config = {
   /**
    * Sapoto PRD #1045 / Tracer A2 — gates the
    * chrome.app/chrome.csi/chrome.loadTimes/Notification.permission stubs
-   * injected by `CDP_STEALTH_INIT_SCRIPT`. Default: on. Pass
+   * injected by `CDP_CAPTURE_BRIDGE_INIT_SCRIPT`. Default: on. Pass
    * `chromeRuntimeStubs: false` (or `--chrome-runtime-stubs=off`) to skip
    * the stubs while keeping other stealth behaviors active.
    */
