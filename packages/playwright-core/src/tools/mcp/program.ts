@@ -15,6 +15,7 @@
  */
 
 import { Option as ProgramOption } from 'commander';
+import { parseCdpStealthCLI } from '@isomorphic/cdpStealthCLIParser';
 import * as mcpServer from '../utils/mcp/server';
 import { commaSeparatedList, dotenvFileLoader, enumParser, headerParser, numberParser, resolutionParser, resolveCLIConfigForMCP, semicolonSeparatedList } from './config';
 import { setupExitWatchdog } from './watchdog';
@@ -34,6 +35,7 @@ export function decorateMCPCommand(command: Command) {
   command
       .option('--allowed-hosts <hosts...>', 'comma-separated list of hosts this server is allowed to serve from. Defaults to the host the server is bound to. Pass \'*\' to disable the host check.', commaSeparatedList)
       .option('--allowed-origins <origins>', 'semicolon-separated list of TRUSTED origins to allow the browser to request. Default is to allow all.\nImportant: *does not* serve as a security boundary and *does not* affect redirects. ', semicolonSeparatedList)
+      .option('--allowed-tools <tools>', 'comma-separated list of tool names to expose. If specified, only these tools are visible.', commaSeparatedList)
       .option('--allow-unrestricted-file-access', 'allow access to files outside of the workspace roots. Also allows unrestricted access to file:// URLs. By default access to file system is restricted to workspace root directories (or cwd if no roots are configured) only, and navigation to file:// URLs is blocked.')
       .option('--blocked-origins <origins>', 'semicolon-separated list of origins to block the browser from requesting. Blocklist is evaluated before allowlist. If used without the allowlist, requests not matching the blocklist are still allowed.\nImportant: *does not* serve as a security boundary and *does not* affect redirects.', semicolonSeparatedList)
       .option('--block-service-workers', 'block service workers')
@@ -46,17 +48,21 @@ export function decorateMCPCommand(command: Command) {
       .option('--config <path>', 'path to the configuration file.')
       .option('--console-level <level>', 'level of console messages to return: "error", "warning", "info", "debug". Each level includes the messages of more severe levels.', enumParser.bind(null, '--console-level', ['error', 'warning', 'info', 'debug']))
       .option('--device <device>', 'device to emulate, for example: "iPhone 15"')
+      .option('--disable-downloads', 'disable Playwright download handling (capture stack owns downloads exclusively)')
       .option('--executable-path <path>', 'path to the browser executable.')
       .option('--extension', 'Connect to a running browser instance (Edge/Chrome only). Requires the "Playwright Extension" to be installed.')
       .option('--endpoint <endpoint>', 'Bound browser endpoint to connect to.')
+      .option('--filter-internal-urls', 'filter out internal Electron tabs (file://, data:, chrome-extension://, localhost) from the tab list')
       .option('--grant-permissions <permissions...>', 'List of permissions to grant to the browser context, for example "geolocation", "clipboard-read", "clipboard-write".', commaSeparatedList)
       .option('--headless', 'run browser in headless mode, headed by default')
       .option('--host <host>', 'host to bind server to. Default is localhost. Use 0.0.0.0 to bind to all interfaces.')
+      .option('--humanize-input <mode>', 'enable humanized input dispatch (bezier-curve mouse paths). Can be "on" or "off". Default is "off".', enumParser.bind(null, '--humanize-input', ['on', 'off']))
       .option('--ignore-https-errors', 'ignore https errors')
       .option('--init-page <path...>', 'path to TypeScript file to evaluate on Playwright page object')
       .option('--init-script <path...>', 'path to JavaScript file to add as an initialization script. The script will be evaluated in every page before any of the page\'s scripts. Can be specified multiple times.')
       .option('--isolated', 'keep the browser profile in memory, do not save it to disk.')
       .option('--image-responses <mode>', 'whether to send image responses to the client. Can be "allow" or "omit", Defaults to "allow".', enumParser.bind(null, '--image-responses', ['allow', 'omit']))
+      .option('--keep-browser-alive', 'do not close the browser when the last tab closes. Currently a no-op against upstream (which no longer auto-closes), preserved for CLI compat with downstream embedders that manage browser lifecycle externally (e.g., Sapoto Electron/Chrome embedding) and pass this flag.')
       .option('--no-sandbox', 'disable the sandbox for all process types that are normally sandboxed.')
       .option('--output-dir <path>', 'path to the directory for output files.')
       .option('--output-mode <mode>', 'whether to save snapshots, console messages, network logs to a file or to the standard output. Can be "file" or "stdout". Default is "stdout".', enumParser.bind(null, '--output-mode', ['file', 'stdout']))
@@ -70,8 +76,35 @@ export function decorateMCPCommand(command: Command) {
       .option('--shared-browser-context', 'reuse the same browser context between all connected HTTP clients.')
       .option('--snapshot-mode <mode>', 'when taking snapshots for responses, specifies the mode to use. Can be "full" or "none". Default is "full".')
       .option('--storage-state <path>', 'path to the storage state file for isolated sessions.')
+      .option('--suppress-focus', 'suppress focus-stealing: skip bringToFront during tab selection (paired stealth init script is applied separately)')
+      // PRD #1045 / Tracer A2 — decomposed CDP-stealth flag surface. See
+      // packages/isomorphic/cdpStealthCLIParser.ts for the per-feature
+      // rationale and the rejection of `network-skip`.
+      .option('--cdp-stealth <list>', 'comma-separated list of CDP-stealth features to enable. Allowed values: "runtime-cycle", "log-skip", "worker-runtime", "all" (= all three), or empty (= none). Replaces the legacy --stealth/--no-stealth boolean; those remain as one-cycle aliases for "all" / empty.', parseCdpStealthCLI)
+      .option('--print-capture', 'enable the deferred window.print override and the matching console-marker bridge (Path D). Default: off.')
+      .option('--chrome-runtime-stubs <mode>', 'gate chrome.app/chrome.csi/chrome.loadTimes/Notification.permission stubs. Can be "on" or "off". Default is "on".', enumParser.bind(null, '--chrome-runtime-stubs', ['on', 'off']))
+      .option('--focus-emulation <mode>', 'gate Emulation.setFocusEmulationEnabled(true). Can be "on" or "off". Default is "on".', enumParser.bind(null, '--focus-emulation', ['on', 'off']))
+      // PRD #1045 / Tracer A2 — legacy boolean alias kept for one release
+      // cycle. We declare both `--stealth` and `--no-stealth` as separate
+      // options (not commander's `--no-X` convention, which would block
+      // direct registration of the positive form) and reconcile them in
+      // the .action normalization step below.
+      //
+      // Three input states (commander folds both flags onto `options.stealth`
+      // because they're declared as a positive `--stealth` + a `--no-stealth`
+      // pair; commander uses `--no-<X>` as the negation of <X>, so the parsed
+      // shape is the single tri-state field below, not a separate `noStealth`):
+      //   - --stealth passed       → options.stealth === true   (force-on)
+      //   - --no-stealth passed    → options.stealth === false  (force-off)
+      //   - neither passed         → options.stealth === undefined (no override)
+      //
+      // resolveStealthAlias() expands the boolean into a cdpStealth wire
+      // payload. `--cdp-stealth=...` takes precedence over both aliases.
+      .option('--stealth', '[deprecated] alias for --cdp-stealth=all. Kept for one release cycle. The stealth bundle minimizes the CDP-domain footprint and pairs with the init script that masks navigator.webdriver, chrome.app/csi/loadTimes, UA brand hints, and Notification.permission to evade bot detection (DataDome, Akamai, Cloudflare Turnstile).')
+      .option('--no-stealth', '[deprecated] alias for --cdp-stealth= (no features). Kept for one release cycle.')
       .option('--test-id-attribute <attribute>', 'specify the attribute to use for test ids, defaults to "data-testid"')
       .option('--timeout-action <timeout>', 'specify action timeout in milliseconds, defaults to 5000ms', numberParser)
+      .option('--timeout-download <timeout>', 'specify download completion timeout in milliseconds, defaults to 30000ms', numberParser)
       .option('--timeout-navigation <timeout>', 'specify navigation timeout in milliseconds, defaults to 60000ms', numberParser)
       .option('--user-agent <ua string>', 'specify user agent string')
       .option('--user-data-dir <path>', 'path to the user data directory. If not specified, a temporary directory will be created.')
@@ -81,6 +114,32 @@ export function decorateMCPCommand(command: Command) {
 
         // normalize the --no-sandbox option: sandbox = true => nothing was passed, sandbox = false => --no-sandbox was passed.
         options.sandbox = options.sandbox === true ? undefined : false;
+
+        // normalize --humanize-input=on|off: 'on' => true, 'off' => false, undefined => undefined.
+        // Leaving the undefined case undefined lets env/config-file values flow through; the
+        // previous shape collapsed it to `false`, silently stomping an env/config `true`.
+        options.humanizeInput = options.humanizeInput === undefined ? undefined : ((options.humanizeInput as unknown as string) === 'on');
+
+        // PRD #1045 / Tracer A2 — normalize the legacy --stealth / --no-stealth
+        // boolean aliases. Both flags are declared above and commander folds
+        // them onto the single `options.stealth` tri-state (its `--no-<X>`
+        // convention is the negation of `--<X>`), so the parser reports three
+        // input states cleanly:
+        //   - options.stealth === true  → user passed `--stealth` (explicit on).
+        //                                 resolveStealthAlias() expands this
+        //                                 to the full 3-feature bundle.
+        //   - options.stealth === false → user passed `--no-stealth` (explicit
+        //                                 off). resolveStealthAlias() expands
+        //                                 this to `cdpStealth: []`.
+        //   - options.stealth === undefined → neither passed. No emit; env /
+        //                                 config-file values flow through merge.
+        // No normalization needed — commander already produces the right shape.
+
+        // normalize --chrome-runtime-stubs / --focus-emulation enums to booleans.
+        // Same pattern as --humanize-input above: emit only when defined so
+        // env / config-file defaults survive merge. PRD #1045 / Tracer A2.
+        options.chromeRuntimeStubs = options.chromeRuntimeStubs === undefined ? undefined : ((options.chromeRuntimeStubs as unknown as string) === 'on');
+        options.focusEmulation = options.focusEmulation === undefined ? undefined : ((options.focusEmulation as unknown as string) === 'on');
 
         setupExitWatchdog();
 

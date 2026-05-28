@@ -266,6 +266,7 @@ export class Mouse {
 
   async click(progress: Progress, x: number, y: number, options: { delay?: number, button?: types.MouseButton, clickCount?: number, steps?: number } = {}) {
     const { delay = null, clickCount = 1, steps } = options;
+    // Serialize move → down → up; see click-event-order.spec.ts for rationale.
     if (delay) {
       await this.move(progress, x, y, { forClick: true, steps });
       for (let cc = 1; cc <= clickCount; ++cc) {
@@ -276,19 +277,11 @@ export class Mouse {
           await progress.wait(delay);
       }
     } else {
-      progress.setAllowConcurrentOrNestedRaces(true);
-      const promises = [];
-      const movePromise = this.move(progress, x, y, { forClick: true, steps });
-      if (steps !== undefined && steps > 1)
-        await movePromise;
-      else
-        promises.push(movePromise);
+      await this.move(progress, x, y, { forClick: true, steps });
       for (let cc = 1; cc <= clickCount; ++cc) {
-        promises.push(this.down(progress, { ...options, clickCount: cc }));
-        promises.push(this.up(progress, { ...options, clickCount: cc }));
+        await this.down(progress, { ...options, clickCount: cc });
+        await this.up(progress, { ...options, clickCount: cc });
       }
-      await Promise.all(promises);
-      progress.setAllowConcurrentOrNestedRaces(false);
     }
   }
 

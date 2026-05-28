@@ -1849,6 +1849,11 @@ export type BrowserTypeLaunchParams = {
   chromiumSandbox?: boolean,
   firefoxUserPrefs?: any,
   cdpPort?: number,
+  cdpStealth?: string[],
+  printCapture?: boolean,
+  chromeRuntimeStubs?: boolean,
+  focusEmulation?: boolean,
+  humanizeInput?: boolean,
   slowMo?: number,
 };
 export type BrowserTypeLaunchOptions = {
@@ -1874,6 +1879,11 @@ export type BrowserTypeLaunchOptions = {
   chromiumSandbox?: boolean,
   firefoxUserPrefs?: any,
   cdpPort?: number,
+  cdpStealth?: string[],
+  printCapture?: boolean,
+  chromeRuntimeStubs?: boolean,
+  focusEmulation?: boolean,
+  humanizeInput?: boolean,
   slowMo?: number,
 };
 export type BrowserTypeLaunchResult = {
@@ -1903,6 +1913,11 @@ export type BrowserTypeLaunchPersistentContextParams = {
   chromiumSandbox?: boolean,
   firefoxUserPrefs?: any,
   cdpPort?: number,
+  cdpStealth?: string[],
+  printCapture?: boolean,
+  chromeRuntimeStubs?: boolean,
+  focusEmulation?: boolean,
+  humanizeInput?: boolean,
   noDefaultViewport?: boolean,
   viewport?: {
     width: number,
@@ -1991,6 +2006,11 @@ export type BrowserTypeLaunchPersistentContextOptions = {
   chromiumSandbox?: boolean,
   firefoxUserPrefs?: any,
   cdpPort?: number,
+  cdpStealth?: string[],
+  printCapture?: boolean,
+  chromeRuntimeStubs?: boolean,
+  focusEmulation?: boolean,
+  humanizeInput?: boolean,
   noDefaultViewport?: boolean,
   viewport?: {
     width: number,
@@ -2067,6 +2087,12 @@ export type BrowserTypeConnectOverCDPParams = {
   isLocal?: boolean,
   noDefaults?: boolean,
   artifactsDir?: string,
+  cdpStealth?: string[],
+  printCapture?: boolean,
+  chromeRuntimeStubs?: boolean,
+  focusEmulation?: boolean,
+  humanizeInput?: boolean,
+  suppressFocus?: boolean,
 };
 export type BrowserTypeConnectOverCDPOptions = {
   headers?: NameValue[],
@@ -2074,6 +2100,12 @@ export type BrowserTypeConnectOverCDPOptions = {
   isLocal?: boolean,
   noDefaults?: boolean,
   artifactsDir?: string,
+  cdpStealth?: string[],
+  printCapture?: boolean,
+  chromeRuntimeStubs?: boolean,
+  focusEmulation?: boolean,
+  humanizeInput?: boolean,
+  suppressFocus?: boolean,
 };
 export type BrowserTypeConnectOverCDPResult = {
   browser: BrowserChannel,

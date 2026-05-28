@@ -52,6 +52,14 @@ BrowserType:
         isLocal: boolean?
         noDefaults: boolean?
         artifactsDir: string?
+        cdpStealth:
+          type: array?
+          items: string
+        printCapture: boolean?
+        chromeRuntimeStubs: boolean?
+        focusEmulation: boolean?
+        humanizeInput: boolean?
+        suppressFocus: boolean?
       returns:
         browser: Browser
         defaultContext: BrowserContext?

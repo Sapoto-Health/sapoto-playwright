@@ -26,6 +26,7 @@ import { isPathInside, isSystemDirectory, isWritable } from '@utils/fileUtils';
 import { playwright } from '../../inprocess';
 
 import { Tab } from './tab';
+import { buildStealthInitScript } from './stealthInitScript';
 
 import type * as playwrightTypes from '../../..';
 import type { SessionLog } from './sessionLog';
@@ -36,9 +37,12 @@ const testDebug = debug('pw:mcp:test');
 
 export type ContextConfig = {
   allowUnrestrictedFileAccess?: boolean;
+  allowedTools?: string[];
   capabilities?: ToolCapability[];
   codegen?: 'typescript' | 'none';
   console?: { level?: 'error' | 'warning' | 'info' | 'debug' };
+  disableDownloads?: boolean;
+  filterInternalUrls?: boolean;
   imageResponses?: 'allow' | 'omit';
   network?: {
     allowedOrigins?: string[];
@@ -52,9 +56,24 @@ export type ContextConfig = {
   snapshot?: {
     mode?: 'full' | 'none';
   };
+  suppressFocus?: boolean;
+  /**
+   * CDP stealth mode. Defaults to true (set explicitly to false to disable).
+   * Drives renderer-side init scripts that mask common automation tells.
+   * Core-side CDP-domain minimization is no longer a single bundled behavior —
+   * PRD #1045 decomposed it into the per-feature `cdpStealth` set (`log-skip`,
+   * `runtime-cycle`, `worker-runtime`; see packages/playwright-core/src/server/cdpStealth.ts
+   * and chromium/cdpStealthGates.ts). This boolean controls only the renderer
+   * init-script bundle today.
+   * Disabled in extension mode (the content-script delivery path patches the page
+   * instead) and skipped when an embedder owns the page via cdpEndpoint without
+   * launchOptions.stealthMode.
+   */
+  stealth?: boolean;
   testIdAttribute?: string;
   timeouts?: {
     action?: number;
+    download?: number;
     navigation?: number;
     expect?: number;
   };
@@ -174,7 +193,8 @@ export class Context {
     const tab = this._tabs[index];
     if (!tab)
       throw new Error(`Tab ${index} not found`);
-    await tab.page.bringToFront();
+    if (!this.config.suppressFocus)
+      await tab.page.bringToFront();
     this._currentTab = tab;
     return tab;
   }
@@ -249,6 +269,77 @@ export class Context {
     if (!this._currentTab)
       this._currentTab = tab;
     this._startPageVideo(page).catch(() => {});
+  }
+
+  /**
+   * Sapoto Architecture A: the backgroundOpenBridge in the Sapoto Electron
+   * app spawns hidden CDP targets via Target.createTarget({background:true})
+   * to capture popup-PDF downloads without focus theft. Those targets ARE
+   * real pages in the BrowserContext, so without this filter they leak into
+   * `browser_tabs` and the agent interacts with them as if they were normal
+   * tabs. The bridge creates each hidden target with
+   * `about:blank#__sapoto_bg=V1:<ts>` so we can recognise it here, BEFORE
+   * the bridge's subsequent Page.navigate replaces the URL with the real
+   * download URL.
+   *
+   * The 'page' event is emitted from Page._markInitialized (page.ts:246),
+   * which fires after CRPage._mainFrameSession._initialize()'s Promise.all
+   * resolves (crPage.ts:111-113, :580). The race-free guarantee that
+   * page.url() reads the marker URL at listener entry rests on three
+   * invariants:
+   *
+   *   1. Target.setAutoAttach({waitForDebuggerOnStart: true}) at the browser
+   *      root (crBrowser.ts:83/88) pauses every new target's renderer at
+   *      creation.
+   *   2. Inside Page.getFrameTree.then() (crPage.ts:471-505), _handleFrameTree
+   *      synchronously commits the initial frame URL to Frame._url via
+   *      frameCommittedNewDocumentNavigation (frames.ts:221).
+   *   3. Sapoto bridge's CDP child session is a separate WebSocket
+   *      (cdpSessionFactory.ts:79 in Sapoto repo) and does NOT send
+   *      Runtime.runIfWaitingForDebugger. Its Page.navigate can't commit
+   *      while the renderer is paused.
+   *
+   * If any of these invariants change (e.g. upstream drops
+   * waitForDebuggerOnStart, or the bridge starts sending
+   * runIfWaitingForDebugger), this filter regresses to a TOCTOU race.
+   *
+   * SECURITY LIMITATION (documented, not fixed): the marker is a public,
+   * predictable URL pattern. A hostile page already loaded in the agent's
+   * BrowserContext can call window.open('about:blank#__sapoto_bg=V1:evil',
+   * '_blank') and the popup becomes invisible to the agent. Mitigation
+   * requires a target-ID registry (the bridge tells the fork which
+   * targetIds to hide via a side channel) OR a per-session HMAC marker —
+   * both larger architectural changes. Tracked as a follow-up to #1083.
+   *
+   * Refs: Sapoto-Health/automatic-document-fetcher#1083 (perception leak)
+   * Refs: Sapoto-Health/automatic-document-fetcher#1044 (Arch A bridge)
+   */
+  private _isSapotoBackgroundTarget(url: string): boolean {
+    // V1 protocol token mirrors __SAPOTO_PATHD_BRIDGE_V1__ — bump on
+    // incompatible changes so old/new code can detect mismatch.
+    return url.startsWith('about:blank#__sapoto_bg=V1:');
+  }
+
+  /**
+   * Check if a URL is an internal Electron application URL that should
+   * be hidden from agents. Matches: file://, data:, chrome-extension://,
+   * localhost, 127.0.0.1. Only consulted when `filterInternalUrls` is set.
+   */
+  private _isInternalUrl(url: string): boolean {
+    if (url.startsWith('file://'))
+      return true;
+    if (url.startsWith('data:'))
+      return true;
+    if (url.startsWith('chrome-extension://'))
+      return true;
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
+        return true;
+    } catch {
+      // invalid URL — not internal
+    }
+    return false;
   }
 
   private _onPageClosed(tab: Tab) {
@@ -342,9 +433,35 @@ export class Context {
     for (const initScript of this.config.browser?.initScript || [])
       this._disposables.push(await browserContext.addInitScript({ path: path.resolve(this.options.cwd, initScript) }));
 
-    for (const page of browserContext.pages())
+    // Operational init script (C3 deferred print, C4 suppressFocus-mode print,
+    // C5 window.open focus-steal shim). Red-tier JS stealth patches (C1/C2)
+    // were removed by Tracer #1137. Only suppressFocus gates remain — when
+    // false the script installs only C3 (deferred print safety net); when true
+    // it additionally installs C4 + C5. Skip entirely when suppressFocus is
+    // off — the C3 deferred print is a no-op safety net that only matters in
+    // Sapoto's Electron mode, which always sets suppressFocus=true.
+    const suppressFocus = !!this.config.suppressFocus;
+    if (suppressFocus) {
+      this._disposables.push(await browserContext.addInitScript(
+          buildStealthInitScript({ suppressFocus })));
+    }
+
+    for (const page of browserContext.pages()) {
+      const url = page.url();
+      if (this._isSapotoBackgroundTarget(url))
+        continue;
+      if (this.config.filterInternalUrls && this._isInternalUrl(url))
+        continue;
       this._onPageCreated(page);
-    this._disposables.push(eventsHelper.addEventListener(browserContext, 'page', page => this._onPageCreated(page)));
+    }
+    this._disposables.push(eventsHelper.addEventListener(browserContext, 'page', page => {
+      const url = page.url();
+      if (this._isSapotoBackgroundTarget(url))
+        return;
+      if (this.config.filterInternalUrls && this._isInternalUrl(url))
+        return;
+      this._onPageCreated(page);
+    }));
 
     return browserContext;
   }

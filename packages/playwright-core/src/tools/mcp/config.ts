@@ -19,6 +19,7 @@ import path from 'path';
 import os from 'os';
 
 import dotenv from 'dotenv';
+import { CDP_STEALTH_CLI_FEATURES, parseCdpStealthCLI } from '@isomorphic/cdpStealthCLIParser';
 import { isSystemDirectory } from '@utils/fileUtils';
 import { playwright } from '../../inprocess';
 import { configFromIniFile } from './configIni';
@@ -53,6 +54,7 @@ export type CLIOptions = {
   grantPermissions?: string[];
   headless?: boolean;
   host?: string;
+  humanizeInput?: boolean;
   ignoreHttpsErrors?: boolean;
   initScript?: string[];
   initPage?: string[];
@@ -71,10 +73,32 @@ export type CLIOptions = {
   storageState?: string;
   testIdAttribute?: string;
   timeoutAction?: number;
+  timeoutDownload?: number;
   timeoutNavigation?: number;
   userAgent?: string;
   userDataDir?: string;
   viewportSize?: ViewportSize;
+  allowedTools?: string[];
+  filterInternalUrls?: boolean;
+  suppressFocus?: boolean;
+  disableDownloads?: boolean;
+  // Currently a no-op against upstream (which no longer auto-closes the browser
+  // when the last tab closes). Accepted here so commander does not exit 1 on
+  // downstream embedders (e.g., Sapoto's four agent runners pass this flag).
+  // Not threaded into the returned Config — there is no consumer to wire it to.
+  keepBrowserAlive?: boolean;
+  // Legacy boolean alias. PRD #1045 / Tracer A2 retains it for one release
+  // cycle; new callers should pass `cdpStealth` directly.
+  stealth?: boolean;
+  // PRD #1045 / Tracer A2 — decomposed CDP-stealth feature set. The CLI
+  // surface `--cdp-stealth=<comma-list>` runs through
+  // `parseCdpStealthCLI` (in `@isomorphic/cdpStealthCLIParser`) before
+  // landing here, so by the time this field is set it is already a
+  // validated `string[]` (or absent).
+  cdpStealth?: string[];
+  printCapture?: boolean;
+  chromeRuntimeStubs?: boolean;
+  focusEmulation?: boolean;
 };
 
 const defaultConfig: MergedConfig = {
@@ -86,6 +110,7 @@ const defaultConfig: MergedConfig = {
     action: 5000,
     navigation: 60000,
     expect: 5000,
+    download: 30000,
   },
 };
 
@@ -123,6 +148,43 @@ export async function resolveCLIConfigForMCP(cliOptions: CLIOptions, env?: NodeJ
   result = mergeConfig(result, resolveConfigPaths(configInFile, configDir));
   result = mergeConfig(result, resolveConfigPaths(envOverrides, process.cwd()));
   result = mergeConfig(result, resolveConfigPaths(cliOverrides, process.cwd()));
+
+  // PRD #1045 / Tracer A2 — apply default-on semantics for `--chrome-runtime-stubs`
+  // and `--focus-emulation` AFTER the CLI/env/config merge. The CLI translator
+  // intentionally drops the undefined case (so an unset CLI flag does not stomp
+  // env or config values during merge); the price of that is that nothing fills
+  // in the spec-mandated default unless we do it here. Only fill in the gap when
+  // the field is still undefined post-merge — preserves explicit `off` (false)
+  // and any config-file false, but turns the no-input case into true so
+  // BrowserOptions sees the documented default instead of `!!undefined === false`.
+  const launchOptions = result.browser.launchOptions as typeof result.browser.launchOptions & {
+    chromeRuntimeStubs?: boolean,
+    focusEmulation?: boolean,
+    cdpStealth?: string[],
+  };
+  if (launchOptions.chromeRuntimeStubs === undefined)
+    launchOptions.chromeRuntimeStubs = true;
+  if (launchOptions.focusEmulation === undefined)
+    launchOptions.focusEmulation = true;
+
+  // PRD #1045 / Tracer A2 — derive the top-level `config.stealth` from
+  // `launchOptions.cdpStealth` during the A2→A5 transition. Background:
+  //   - The legacy `--no-stealth` alias sets `config.stealth = false`.
+  //   - The new `--cdp-stealth=` surface sets `launchOptions.cdpStealth = []`
+  //     but leaves `config.stealth` untouched.
+  //   - The init-script gate in tools/backend/context.ts defaults
+  //     `stealth = (config.stealth !== false)`, which means
+  //     `--cdp-stealth=` alone would leave the init script installed even
+  //     though the user has decomposed the feature set to zero. Asymmetric.
+  // Deriving `config.stealth` here makes the two CLI surfaces behaviorally
+  // equivalent for the init-script gate: empty cdpStealth → stealth=false,
+  // non-empty cdpStealth → stealth=true. Explicit `--stealth` (true) and
+  // `--no-stealth` (false) at the CLI win, since they set `result.stealth`
+  // before this fallback runs. A5 will eventually consume
+  // chromeRuntimeStubs / focusEmulation directly and this derivation can
+  // shrink, but for the transition it removes the dual-source foot-gun.
+  if (result.stealth === undefined && launchOptions.cdpStealth !== undefined)
+    result.stealth = launchOptions.cdpStealth.length > 0;
 
   const browser = await validateBrowserConfig(result.browser);
   if (browser.launchOptions.headless === undefined)
@@ -274,8 +336,24 @@ function resolveBrowserParam(browserOption: string | undefined): { browserName?:
 function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: string } {
   const { browserName, channel } = resolveBrowserParam(cliOptions.browser);
 
-  // Launch options
-  const launchOptions: playwrightTypes.LaunchOptions = {
+  // Launch options. Extend the public LaunchOptions surface with the fork-internal
+  // humanizeInput / cdpStealth feature-set flags — they're plumbed through the
+  // channel & server but not yet part of the published types.
+  //
+  // PRD #1045 / Tracer A2: `stealthMode: boolean` is gone from the launchOptions
+  // wire. The legacy `--stealth` / `--no-stealth` CLI aliases are translated to
+  // `cdpStealth: string[]` HERE (see resolveStealthAlias below) so the server
+  // side only ever sees the new shape. The validator on
+  // `BrowserTypeLaunchParams` accepts cdpStealth/printCapture/chromeRuntimeStubs/
+  // focusEmulation, so they flow through as long as we put them on launchOptions.
+  type ForkLaunchOptions = playwrightTypes.LaunchOptions & {
+    humanizeInput?: boolean;
+    cdpStealth?: string[];
+    printCapture?: boolean;
+    chromeRuntimeStubs?: boolean;
+    focusEmulation?: boolean;
+  };
+  const launchOptions: ForkLaunchOptions = {
     channel,
     executablePath: cliOptions.executablePath,
     headless: cliOptions.headless,
@@ -285,6 +363,41 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
   // --no-sandbox was passed, disable the sandbox
   if (cliOptions.sandbox !== undefined)
     launchOptions.chromiumSandbox = cliOptions.sandbox;
+
+  // --humanize-input on => true, off => false. Emit whenever defined so an
+  // explicit `off` can override an env/config-file `true` during merge; the
+  // prior truthy-only branch silently dropped the off case.
+  if (cliOptions.humanizeInput !== undefined)
+    launchOptions.humanizeInput = cliOptions.humanizeInput;
+
+  // PRD #1045 / Tracer A2 — CDP stealth feature set.
+  //
+  // Two input forms reach this point:
+  //   1. `cliOptions.cdpStealth: string[] | undefined` — the new decomposed
+  //      surface. Already parsed/validated by `parseCdpStealthCLI` at the
+  //      commander layer (or by the env-var path below), so we forward as-is.
+  //   2. `cliOptions.stealth: boolean | undefined` — the legacy alias kept
+  //      for one release cycle. `true` expands to the canonical 3-feature
+  //      bundle, `false` collapses to the empty array.
+  //
+  // Precedence (mirrors `@isomorphic/cdpStealthAlias.resolveCdpStealthAlias`):
+  // explicit `cdpStealth` wins over legacy `stealth`. Both undefined → no
+  // emit (pickDefined drops it during merge, so env / config-file values
+  // survive). This matters because the CLI is the highest-precedence layer;
+  // re-asserting an empty value would stomp lower-precedence config.
+  const cdpStealthFromCLI = resolveStealthAlias(cliOptions);
+  if (cdpStealthFromCLI !== undefined)
+    launchOptions.cdpStealth = cdpStealthFromCLI;
+
+  // PRD #1045 / Tracer A2 — three decomposed booleans. Same emit-when-defined
+  // pattern as cdpStealth above so an unset CLI flag doesn't stomp env /
+  // config-file values during merge.
+  if (cliOptions.printCapture !== undefined)
+    launchOptions.printCapture = cliOptions.printCapture;
+  if (cliOptions.chromeRuntimeStubs !== undefined)
+    launchOptions.chromeRuntimeStubs = cliOptions.chromeRuntimeStubs;
+  if (cliOptions.focusEmulation !== undefined)
+    launchOptions.focusEmulation = cliOptions.focusEmulation;
 
   if (cliOptions.device && cliOptions.cdpEndpoint)
     throw new Error('Device emulation is not supported with cdpEndpoint.');
@@ -361,7 +474,27 @@ function configFromCLIOptions(cliOptions: CLIOptions): Config & { configFile?: s
     timeouts: {
       action: cliOptions.timeoutAction,
       navigation: cliOptions.timeoutNavigation,
+      download: cliOptions.timeoutDownload,
     },
+    allowedTools: cliOptions.allowedTools,
+    filterInternalUrls: cliOptions.filterInternalUrls,
+    suppressFocus: cliOptions.suppressFocus,
+    disableDownloads: cliOptions.disableDownloads,
+    // Accepted-but-currently-unconsumed: upstream removed the auto-close path
+    // this flag gated, so it's a no-op today. Threaded through configFromCLIOptions
+    // so downstream embedders (Sapoto) can pass --keep-browser-alive without
+    // commander crashing the MCP child. pickDefined() drops the undefined case.
+    keepBrowserAlive: cliOptions.keepBrowserAlive,
+    // PRD #1045 / Tracer A2 — legacy boolean alias kept for one release cycle.
+    // The decomposed surface is `cdpStealth`/`printCapture`/`chromeRuntimeStubs`/
+    // `focusEmulation` on `launchOptions` above; those four are the new model.
+    // `config.stealth` is now derived from `launchOptions.cdpStealth.length > 0`
+    // in `resolveCLIConfigForMCP` (post-merge) when undefined, so the
+    // `--no-stealth` and `--cdp-stealth=` CLI surfaces are behaviorally
+    // equivalent for the init-script gate in tools/backend/context.ts during
+    // the A2→A5 transition. The pass-through below preserves explicit user
+    // input (true/false) and lets undefined fall through to the derivation.
+    stealth: cliOptions.stealth,
   };
 
   return { ...config, configFile: cliOptions.config };
@@ -389,6 +522,7 @@ export function configFromEnv(env?: NodeJS.ProcessEnv): Config & { configFile?: 
   options.grantPermissions = commaSeparatedList(e.PLAYWRIGHT_MCP_GRANT_PERMISSIONS);
   options.headless = envToBoolean(e.PLAYWRIGHT_MCP_HEADLESS);
   options.host = envToString(e.PLAYWRIGHT_MCP_HOST);
+  options.humanizeInput = envToBoolean(e.PLAYWRIGHT_MCP_HUMANIZE_INPUT);
   options.ignoreHttpsErrors = envToBoolean(e.PLAYWRIGHT_MCP_IGNORE_HTTPS_ERRORS);
   const initPage = envToString(e.PLAYWRIGHT_MCP_INIT_PAGE);
   if (initPage)
@@ -409,10 +543,33 @@ export function configFromEnv(env?: NodeJS.ProcessEnv): Config & { configFile?: 
   options.storageState = envToString(e.PLAYWRIGHT_MCP_STORAGE_STATE);
   options.testIdAttribute = envToString(e.PLAYWRIGHT_MCP_TEST_ID_ATTRIBUTE);
   options.timeoutAction = numberParser(e.PLAYWRIGHT_MCP_TIMEOUT_ACTION);
+  options.timeoutDownload = numberParser(e.PLAYWRIGHT_MCP_TIMEOUT_DOWNLOAD);
   options.timeoutNavigation = numberParser(e.PLAYWRIGHT_MCP_TIMEOUT_NAVIGATION);
   options.userAgent = envToString(e.PLAYWRIGHT_MCP_USER_AGENT);
   options.userDataDir = envToString(e.PLAYWRIGHT_MCP_USER_DATA_DIR);
   options.viewportSize = resolutionParser('--viewport-size', e.PLAYWRIGHT_MCP_VIEWPORT_SIZE);
+  options.allowedTools = commaSeparatedList(e.PLAYWRIGHT_MCP_ALLOWED_TOOLS);
+  options.filterInternalUrls = envToBoolean(e.PLAYWRIGHT_MCP_FILTER_INTERNAL_URLS);
+  options.suppressFocus = envToBoolean(e.PLAYWRIGHT_MCP_SUPPRESS_FOCUS);
+  options.disableDownloads = envToBoolean(e.PLAYWRIGHT_MCP_DISABLE_DOWNLOADS);
+  options.keepBrowserAlive = envToBoolean(e.PLAYWRIGHT_MCP_KEEP_BROWSER_ALIVE);
+  // PLAYWRIGHT_MCP_STEALTH=0 / false disables CDP stealth mode (default on).
+  // Legacy boolean alias — PRD #1045 / Tracer A2 retains it for one release
+  // cycle. The new decomposed surface is PLAYWRIGHT_MCP_CDP_STEALTH below.
+  if (e.PLAYWRIGHT_MCP_STEALTH !== undefined)
+    options.stealth = envToBoolean(e.PLAYWRIGHT_MCP_STEALTH);
+  // PRD #1045 / Tracer A2 — env-var equivalents for the new flag surface.
+  // PLAYWRIGHT_MCP_CDP_STEALTH accepts the same comma-list / "all" / empty
+  // forms as --cdp-stealth on the CLI. Explicit cdpStealth wins over the
+  // legacy stealth alias (resolveStealthAlias enforces precedence).
+  if (e.PLAYWRIGHT_MCP_CDP_STEALTH !== undefined)
+    options.cdpStealth = parseCdpStealthCLI(e.PLAYWRIGHT_MCP_CDP_STEALTH);
+  if (e.PLAYWRIGHT_MCP_PRINT_CAPTURE !== undefined)
+    options.printCapture = envToBoolean(e.PLAYWRIGHT_MCP_PRINT_CAPTURE);
+  if (e.PLAYWRIGHT_MCP_CHROME_RUNTIME_STUBS !== undefined)
+    options.chromeRuntimeStubs = envToBoolean(e.PLAYWRIGHT_MCP_CHROME_RUNTIME_STUBS);
+  if (e.PLAYWRIGHT_MCP_FOCUS_EMULATION !== undefined)
+    options.focusEmulation = envToBoolean(e.PLAYWRIGHT_MCP_FOCUS_EMULATION);
   return configFromCLIOptions(options);
 }
 
@@ -568,4 +725,25 @@ function envToBoolean(value: string | undefined): boolean | undefined {
 
 function envToString(value: string | undefined): string | undefined {
   return value ? value.trim() : undefined;
+}
+
+/**
+ * PRD #1045 / Tracer A2 — translate the CLI-level cdpStealth + legacy stealth
+ * inputs into the wire-format `string[]`.
+ *
+ * Precedence (mirrors @isomorphic/cdpStealthAlias.resolveCdpStealthAlias):
+ *   - explicit `cdpStealth` (already validated by parseCdpStealthCLI / env
+ *     parser) wins as-is. Empty array survives.
+ *   - legacy `stealth: true`  → full 3-feature bundle.
+ *   - legacy `stealth: false` → empty array (explicit opt-out).
+ *   - both undefined → undefined (no emit; pickDefined drops it during merge).
+ */
+function resolveStealthAlias(cliOptions: CLIOptions): string[] | undefined {
+  if (cliOptions.cdpStealth !== undefined)
+    return [...cliOptions.cdpStealth];
+  if (cliOptions.stealth === true)
+    return [...CDP_STEALTH_CLI_FEATURES];
+  if (cliOptions.stealth === false)
+    return [];
+  return undefined;
 }

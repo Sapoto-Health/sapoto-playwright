@@ -988,6 +988,11 @@ scheme.BrowserTypeLaunchParams = tObject({
   chromiumSandbox: tOptional(tBoolean),
   firefoxUserPrefs: tOptional(tAny),
   cdpPort: tOptional(tInt),
+  cdpStealth: tOptional(tArray(tString)),
+  printCapture: tOptional(tBoolean),
+  chromeRuntimeStubs: tOptional(tBoolean),
+  focusEmulation: tOptional(tBoolean),
+  humanizeInput: tOptional(tBoolean),
   slowMo: tOptional(tFloat),
 });
 scheme.BrowserTypeLaunchResult = tObject({
@@ -1017,6 +1022,11 @@ scheme.BrowserTypeLaunchPersistentContextParams = tObject({
   chromiumSandbox: tOptional(tBoolean),
   firefoxUserPrefs: tOptional(tAny),
   cdpPort: tOptional(tInt),
+  cdpStealth: tOptional(tArray(tString)),
+  printCapture: tOptional(tBoolean),
+  chromeRuntimeStubs: tOptional(tBoolean),
+  focusEmulation: tOptional(tBoolean),
+  humanizeInput: tOptional(tBoolean),
   noDefaultViewport: tOptional(tBoolean),
   viewport: tOptional(tObject({
     width: tInt,
@@ -1094,6 +1104,12 @@ scheme.BrowserTypeConnectOverCDPParams = tObject({
   isLocal: tOptional(tBoolean),
   noDefaults: tOptional(tBoolean),
   artifactsDir: tOptional(tString),
+  cdpStealth: tOptional(tArray(tString)),
+  printCapture: tOptional(tBoolean),
+  chromeRuntimeStubs: tOptional(tBoolean),
+  focusEmulation: tOptional(tBoolean),
+  humanizeInput: tOptional(tBoolean),
+  suppressFocus: tOptional(tBoolean),
 });
 scheme.BrowserTypeConnectOverCDPResult = tObject({
   browser: tChannel(['Browser']),

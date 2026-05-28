@@ -18,6 +18,8 @@
 import { assert } from '@isomorphic/assert';
 import { rewriteErrorMessage } from '@isomorphic/stackTrace';
 import { eventsHelper } from '@utils/eventsHelper';
+import { shouldCycleRuntimeOnFrameNavigation, shouldCycleRuntimeOnInit, shouldSkipLogEnable } from './cdpStealthGates';
+import { buildChromeBrands } from './chromeUaBrands';
 import * as dialog from '../dialog';
 import * as dom from '../dom';
 import * as frames from '../frames';
@@ -31,6 +33,7 @@ import { createHandle, CRExecutionContext } from './crExecutionContext';
 import { RawKeyboardImpl, RawMouseImpl, RawTouchscreenImpl } from './crInput';
 import { CRNetworkManager } from './crNetworkManager';
 import { CRPDF } from './crPdf';
+import { generateUtilityWorldName } from './crUtilityWorldName';
 import { exceptionToError, releaseObject, stackTraceToLocation } from './crProtocolHelper';
 import { platformToFontFamilies } from './defaultFontFamilies';
 import { TargetClosedError } from '../errors';
@@ -87,9 +90,8 @@ export class CRPage implements PageDelegate {
     this._coverage = new CRCoverage(client);
     this._browserContext = browserContext;
     this._page = new Page(this, browserContext);
-    // Create a unique utility world for this Playwright instance, just in case there
-    // are multiple instances of Playwright connected to the same browser page.
-    this.utilityWorldName = `__playwright_utility_world_${this._page.guid}`;
+    // Per-page opaque utility-world name; see crUtilityWorldName.ts for rationale.
+    this.utilityWorldName = generateUtilityWorldName();
     this._networkManager = new CRNetworkManager(this._page, null);
     // Sync any browser context state to the network manager. This does not talk over CDP because
     // we have not connected any sessions to the network manager yet.
@@ -501,9 +503,30 @@ class FrameSession {
           this._eventListeners.push(eventsHelper.addEventListener(this._client, 'Page.lifecycleEvent', event => this._onLifecycleEvent(event)));
         }
       }),
-      this._client.send('Log.enable', {}),
+      // CDP Stealth: Log.enable only surfaces browser-level warnings (network errors,
+      // deprecation notices). Console messages come from Runtime.consoleAPICalled instead.
+      // Skipping it removes a CDP domain that anti-bot fingerprinters watch for, with no
+      // functional impact on MCP tools.
+      // PRD #1045 / Tracer A3: per-feature gate `cdpStealth.has('log-skip')` (via
+      // shouldSkipLogEnable). Replaces the A1 placeholder coarse non-empty check.
+      ...(shouldSkipLogEnable(this._crPage._browserContext._browser.options.cdpStealth) ? [] : [this._client.send('Log.enable', {})]),
       lifecycleEventsEnabled = this._client.send('Page.setLifecycleEventsEnabled', { enabled: true }),
-      this._client.send('Runtime.enable', {}),
+      // CDP Stealth: when the runtime-cycle gate is on, use a rapid Runtime.enable →
+      // disable cycle. The Runtime domain emits `executionContextCreated` synchronously
+      // and the events queue as microtasks; we let those drain, then immediately disable
+      // so the long-lived Runtime domain (the strongest anti-bot fingerprint — the
+      // `console.debug` Proxy trap) is not visible to page scripts.
+      // `runIfWaitingForDebugger` runs later in this Promise.all, so the page is still
+      // paused while we cycle.
+      // PRD #1045 / Tracer A3: per-feature gate `cdpStealth.has('runtime-cycle')` (via
+      // shouldCycleRuntimeOnInit). Replaces the A1 placeholder coarse non-empty check.
+      this._client.send('Runtime.enable', {}).then(() => {
+        if (shouldCycleRuntimeOnInit(this._crPage._browserContext._browser.options.cdpStealth)) {
+          return Promise.resolve().then(() => {
+            return this._client._sendMayFail('Runtime.disable');
+          });
+        }
+      }),
       this._client.send('Page.addScriptToEvaluateOnNewDocument', {
         source: '',
         worldName: this._crPage.utilityWorldName,
@@ -531,6 +554,14 @@ class FrameSession {
         promises.push(this._client.send('Emulation.setScriptExecutionDisabled', { value: true }));
       if (options.userAgent || options.locale)
         promises.push(this._updateUserAgent());
+      // CDP Stealth: even when the user did NOT override the UA, emulate Chrome's
+      // Client Hint brands so navigator.userAgentData.brands matches the binary's
+      // major version. Pages can detect automation when the UA-string Chrome version
+      // mismatches userAgentData.brands (Playwright doesn't normally set brands).
+      // Gated on !skipDefaultOverrides so connectOverCDP({ noDefaults: true }) callers
+      // who explicitly opted out of default emulation don't get UA brand overrides.
+      if (!skipDefaultOverrides)
+        promises.push(this._updateUserAgentBrands());
       if (options.locale)
         promises.push(emulateLocale(this._client, options.locale));
       if (options.timezoneId)
@@ -629,6 +660,25 @@ class FrameSession {
     this._page.frameManager.frameCommittedNewDocumentNavigation(framePayload.id, framePayload.url + (framePayload.urlFragment || ''), framePayload.name || '', framePayload.loaderId, initial);
     if (!initial)
       this._firstNonInitialNavigationCommittedFulfill();
+
+    // CDP Stealth: on cross-document navigation, the new document's execution contexts
+    // need fresh discovery, but Runtime.disable stops executionContext* events. Rapid
+    // re-enable / disable now (before the new document's scripts run — Page.frameNavigated
+    // fires at commit time, ahead of DOMContentLoaded) keeps the contexts visible to
+    // Playwright while keeping the Runtime domain dark to page scripts.
+    // PRD #1045 / Tracer A3: per-feature gate `cdpStealth.has('runtime-cycle')` (via
+    // shouldCycleRuntimeOnFrameNavigation). Same flag controls both this and the init
+    // site — splitting them is intentionally out of scope.
+    if (shouldCycleRuntimeOnFrameNavigation(this._crPage._browserContext._browser.options.cdpStealth) && !initial) {
+      // Stale contexts won't be cleared via executionContextsCleared (Runtime is disabled);
+      // clear manually before the re-enable below.
+      this._onExecutionContextsCleared();
+      this._client.send('Runtime.enable', {}).then(() => {
+        return Promise.resolve().then(() => {
+          return this._client._sendMayFail('Runtime.disable');
+        });
+      }).catch(() => {});
+    }
   }
 
   _onFrameRequestedNavigation(payload: Protocol.Page.frameRequestedNavigationPayload) {
@@ -1008,6 +1058,63 @@ class FrameSession {
     });
   }
 
+  // CDP Stealth: Emulate Chrome's Client Hint brand list (`navigator.userAgentData.brands`,
+  // `fullVersionList`) so the values match the browser binary's actual version. Without
+  // this, the brands are either missing or stamped with a default that doesn't match
+  // the running Chrome — both are strong automation tells. Only runs when the caller did
+  // NOT provide a custom UA (otherwise we'd risk advertising brands that contradict their
+  // override). Skipped for Edge and HeadlessChrome which produce different brand strings.
+  async _updateUserAgentBrands(): Promise<void> {
+    const options = this._crPage._browserContext._options;
+    if (options.userAgent)
+      return;
+    const browser = this._crPage._browserContext._browser;
+    const ua = browser.userAgent();
+    if (!ua.includes('Chrome/') || ua.includes('Edg/') || ua.includes('HeadlessChrome'))
+      return;
+    const brandInfo = buildChromeBrands(browser.version());
+    if (!brandInfo)
+      return;
+
+    const metadata: Protocol.Emulation.UserAgentMetadata = {
+      brands: brandInfo.brands,
+      fullVersionList: brandInfo.fullVersionList,
+      fullVersion: brandInfo.fullVersion,
+      platform: 'Unknown',
+      platformVersion: '',
+      architecture: 'x86',
+      model: '',
+      mobile: false,
+    };
+    // Derive platform metadata from the real UA so it stays internally consistent.
+    if (ua.includes('Macintosh')) {
+      metadata.platform = 'macOS';
+      const match = ua.match(/Mac OS X (\d+[_.\d]*)/);
+      if (match)
+        metadata.platformVersion = match[1].replace(/_/g, '.');
+      if (!ua.includes('Intel'))
+        metadata.architecture = 'arm';
+    } else if (ua.includes('Windows')) {
+      metadata.platform = 'Windows';
+      const match = ua.match(/Windows NT (\d+[.\d]*)/);
+      if (match)
+        metadata.platformVersion = match[1];
+    } else if (ua.toLowerCase().includes('linux')) {
+      metadata.platform = 'Linux';
+    }
+
+    await this._client.send('Emulation.setUserAgentOverride', {
+      userAgent: ua, // must be non-empty for CDP to apply userAgentMetadata
+      // Emulation.setUserAgentOverride is a full replace, not a merge. _updateUserAgent
+      // (when options.userAgent || options.locale) sets acceptLanguage in its own
+      // setUserAgentOverride call, and both functions ride the same _initialize
+      // Promise.all. A late brands resolution previously wiped the locale; re-pass it
+      // here so the second call doesn't clobber acceptLanguage when only locale was set.
+      acceptLanguage: options.locale,
+      userAgentMetadata: metadata,
+    });
+  }
+
   private async _setDefaultFontFamilies(session: CRSession) {
     const fontFamilies = platformToFontFamilies[this._crPage._browserContext._browser._platform()];
     await session.send('Page.setFontFamilies', fontFamilies);
@@ -1216,3 +1323,9 @@ function calculateUserAgentMetadata(options: types.BrowserContextOptions) {
     metadata.architecture = 'arm';
   return metadata;
 }
+
+// CDP Stealth: `buildChromeBrands` is extracted to ./chromeUaBrands so that unit
+// tests can import it without transitively pulling in dom.ts (whose `declare
+// readonly` class fields choke babel-jest's parser). Re-exported here so existing
+// `import { buildChromeBrands } from './crPage'` callers keep working.
+export { buildChromeBrands } from './chromeUaBrands';

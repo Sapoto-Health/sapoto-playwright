@@ -77,9 +77,10 @@ export interface BrowserContextFactory {
 }
 
 function browserInfo(browser: playwrightTypes.Browser, config: FullConfig): BrowserInfo {
+  // Internal access: _guid lives on ChannelOwner but is not on the public Browser type.
+  const browserWithGuid = browser as playwrightTypes.Browser & { _guid: string };
   return {
-    // eslint-disable-next-line no-restricted-syntax
-    guid: (browser as any)._guid,
+    guid: browserWithGuid._guid,
     browserName: config.browser.browserName,
     launchOptions: config.browser.launchOptions,
     userDataDir: config.browser.userDataDir
@@ -105,11 +106,66 @@ async function createIsolatedBrowser(config: FullConfig, clientInfo: ClientInfo)
 async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Promise<playwrightTypes.Browser> {
   testDebug('create browser (cdp)');
   const artifactsDir = await computeTracesDir(config, clientInfo);
-  const browser = await playwright.chromium.connectOverCDP(config.browser.cdpEndpoint!, {
+  // CDP stealth flag flows in via launchOptions for the launch path; for the CDP-attach
+  // path it has to be threaded through connectOverCDP separately.
+  // Fork extensions on public LaunchOptions / ConnectOverCDPOptions surfaces:
+  // PRD #1045 / Tracer A1: still reads the legacy `stealthMode` boolean from
+  // launchOptions and forwards it for one release cycle. The client-side
+  // `resolveCdpStealthAlias` turns it into the new `cdpStealth: string[]` wire
+  // field.
+  // PRD #1045 / Tracer A2: also forwards the new decomposed surface (cdpStealth /
+  // printCapture / chromeRuntimeStubs / focusEmulation). configFromCLIOptions
+  // writes all four onto `config.browser.launchOptions`; the connectOverCDP
+  // channel accepts them (validator.ts BrowserTypeConnectOverCDPParams), so this
+  // function just needs to copy them through. Without this the --cdp-endpoint
+  // attach path silently drops every new field and the user sees the unstealthed
+  // default no matter what they pass on the CLI.
+  const launchOptionsWithFork = config.browser.launchOptions as (playwrightTypes.LaunchOptions & {
+    stealthMode?: boolean,
+    cdpStealth?: string[],
+    printCapture?: boolean,
+    chromeRuntimeStubs?: boolean,
+    focusEmulation?: boolean,
+    humanizeInput?: boolean,
+  }) | undefined;
+  const stealthMode = launchOptionsWithFork?.stealthMode === true;
+  const connectOptions: playwrightTypes.ConnectOverCDPOptions & {
+    stealthMode?: boolean,
+    cdpStealth?: string[],
+    printCapture?: boolean,
+    chromeRuntimeStubs?: boolean,
+    focusEmulation?: boolean,
+    suppressFocus?: boolean,
+    humanizeInput?: boolean,
+  } = {
     headers: config.browser.cdpHeaders,
     timeout: config.browser.cdpTimeout,
     artifactsDir,
-  });
+  };
+  if (stealthMode)
+    connectOptions.stealthMode = true;
+  // PRD #1045 / Tracer A2 — forward the decomposed fields. Mirror the
+  // configFromCLIOptions "emit when defined" pattern so undefined doesn't stomp
+  // any client-side alias resolution happening downstream in the channel layer.
+  if (launchOptionsWithFork?.cdpStealth !== undefined)
+    connectOptions.cdpStealth = launchOptionsWithFork.cdpStealth;
+  if (launchOptionsWithFork?.printCapture !== undefined)
+    connectOptions.printCapture = launchOptionsWithFork.printCapture;
+  if (launchOptionsWithFork?.chromeRuntimeStubs !== undefined)
+    connectOptions.chromeRuntimeStubs = launchOptionsWithFork.chromeRuntimeStubs;
+  if (launchOptionsWithFork?.focusEmulation !== undefined)
+    connectOptions.focusEmulation = launchOptionsWithFork.focusEmulation;
+  // humanizeInput was dropped from the CDP-attach path until now — only the
+  // launch path forwarded it via the launchOptions spread. Mirror the same
+  // `!== undefined` guard so --humanize-input works on --cdp-endpoint too.
+  if (launchOptionsWithFork?.humanizeInput !== undefined)
+    connectOptions.humanizeInput = launchOptionsWithFork.humanizeInput;
+  // Sapoto #1036: when --suppress-focus is set, thread it through so the chromium
+  // server emits `Target.createTarget { background: true }` and Chrome does not
+  // steal OS focus on `browser_tabs { action: "new" }`.
+  if (config.suppressFocus)
+    connectOptions.suppressFocus = true;
+  const browser = await playwright.chromium.connectOverCDP(config.browser.cdpEndpoint!, connectOptions);
   return browser;
 }
 

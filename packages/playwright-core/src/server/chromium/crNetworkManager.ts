@@ -85,6 +85,13 @@ export class CRNetworkManager {
       ]);
     }
     this._sessions.set(session, sessionInfo);
+    // Always enable Network. Earlier stealth gating skipped Network.enable to minimize
+    // the CDP-domain footprint, but that broke `page.on('request'|'response')` listeners
+    // and the browser_network_requests tool by default — and the self-healing path only
+    // re-enabled Network when Fetch.enable flipped on (i.e., when interception came up),
+    // not when a plain request listener was registered. The fingerprint surface stealth
+    // was trying to minimize is handled by stealthInitScript.ts (DOM/Runtime stubs);
+    // skipping Network.enable was overreach.
     await Promise.all([
       session.send('Network.enable'),
       this._updateProtocolRequestInterceptionForSession(sessionInfo, true /* initial */),

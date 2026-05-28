@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { Worker } from '../page';
+import { applyWorkerStealth } from './cdpStealthGates';
 import { createHandle, CRExecutionContext } from './crExecutionContext';
 import { CRNetworkManager } from './crNetworkManager';
 import { BrowserContext } from '../browserContext';
@@ -64,8 +65,23 @@ export class CRServiceWorker extends Worker {
       this.browserContext.emit(BrowserContext.Events.Console, message);
     });
 
-    session.send('Runtime.enable', {}).catch(e => {});
-    session.send('Runtime.runIfWaitingForDebugger').catch(e => {});
+    // CDP Stealth (PRD #1045 / Tracer A3): when the `worker-runtime` gate is on, mirror
+    // the page's init-time rapid Runtime.enable → Runtime.disable cycle on this worker
+    // session. Lets us drain `executionContextCreated` events for context discovery,
+    // then immediately disables so the long-lived Runtime domain (and its `console.debug`
+    // Proxy trap) is not visible to worker scripts. Without the gate we keep the
+    // long-lived `Runtime.enable` that upstream issues — the previous-generation
+    // bundled behavior issued Runtime.enable unconditionally here.
+    //
+    // `Runtime.runIfWaitingForDebugger` is chained AFTER the (optional) `Runtime.disable`
+    // so the worker cannot resume before the cycle lands; previously these were two
+    // independent fire-and-forget promises and the worker could race past the disable,
+    // defeating the entire mitigation. The ordering lives inside `applyWorkerStealth`
+    // so both production and the ordering test share the same call sequence.
+    applyWorkerStealth({
+      send: (method, params) => session.send(method as any, params),
+      sendMayFail: (method, params) => session._sendMayFail(method as any, params),
+    }, this.browserContext._browser.options.cdpStealth);
     session.on('Inspector.targetReloadedAfterCrash', () => {
       // Resume service worker after restart.
       session._sendMayFail('Runtime.runIfWaitingForDebugger', {});

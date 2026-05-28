@@ -26,6 +26,7 @@ import { existsAsync } from '@utils/fileUtils';
 import { envArrayToObject, launchProcess } from '@utils/processLauncher';
 import { RecentLogsCollector } from '@utils/debugLogger';
 import { normalizeProxySettings, validateBrowserContextOptions } from './browserContext';
+import { parseCdpStealthFeatures } from './cdpStealth';
 import { helper } from './helper';
 import { SdkObject } from './instrumentation';
 import { PipeTransport } from './pipeTransport';
@@ -131,6 +132,14 @@ export abstract class BrowserType extends SdkObject {
         wsEndpoint,
         originalLaunchOptions: options,
         userDataDir: persistent ? userDataDir : undefined,
+        // Sapoto PRD #1045 / Tracer A1: parseCdpStealthFeatures throws on
+        // unknown values, so an invalid wire payload surfaces at launch time
+        // instead of silently degrading inside crPage.
+        cdpStealth: parseCdpStealthFeatures(options.cdpStealth),
+        printCapture: !!options.printCapture,
+        chromeRuntimeStubs: !!options.chromeRuntimeStubs,
+        focusEmulation: !!options.focusEmulation,
+        humanizeInput: options.humanizeInput,
       };
       if (persistent)
         validateBrowserContextOptions(persistent, browserOptions);
@@ -286,7 +295,7 @@ export abstract class BrowserType extends SdkObject {
     }
   }
 
-  async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, timeout?: number, headers?: types.HeadersArray, isLocal?: boolean, noDefaults?: boolean, artifactsDir?: string }): Promise<Browser> {
+  async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, timeout?: number, headers?: types.HeadersArray, isLocal?: boolean, noDefaults?: boolean, artifactsDir?: string, cdpStealth?: string[], printCapture?: boolean, chromeRuntimeStubs?: boolean, focusEmulation?: boolean, humanizeInput?: boolean, suppressFocus?: boolean }): Promise<Browser> {
     throw new Error('CDP connections are only supported by Chromium');
   }
 

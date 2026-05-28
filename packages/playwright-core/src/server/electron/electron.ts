@@ -285,6 +285,13 @@ export class Electron extends SdkObject {
         downloadsPath: artifactsDir,
         tracesDir: options.tracesDir || artifactsDir,
         originalLaunchOptions: {},
+        // PRD #1045 / Tracer A1: Electron embedders don't opt into CDP stealth
+        // (they own the renderer and its detection surface). Keep these at
+        // the "no stealth" default; A3/A5 may revisit if needed.
+        cdpStealth: new Set(),
+        printCapture: false,
+        chromeRuntimeStubs: false,
+        focusEmulation: false,
       };
       validateBrowserContextOptions(contextOptions, browserOptions);
       const browser = await progress.race(CRBrowser.connect(this.attribution.playwright, chromeTransport, browserOptions));

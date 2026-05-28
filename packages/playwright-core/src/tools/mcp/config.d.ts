@@ -206,6 +206,11 @@ export type Config = {
      * Configures default expect timeout: https://playwright.dev/docs/test-timeouts#expect-timeout. Defaults to 5000ms.
      */
     expect?: number;
+
+    /*
+     * Configures download completion timeout in waitForCompletion. Defaults to 30000ms.
+     */
+    download?: number;
   };
 
   /**
@@ -232,4 +237,107 @@ export type Config = {
    * Specify the language to use for code generation.
    */
   codegen?: 'typescript' | 'none';
+
+  /**
+   * Filter out internal Electron application tabs (file://, data:, chrome-extension://,
+   * localhost, 127.0.0.1) from the tab list so agents never see them.
+   */
+  filterInternalUrls?: boolean;
+
+  /**
+   * If specified, only expose tools whose names are in this list.
+   * Applied after capability filtering.
+   */
+  allowedTools?: string[];
+
+  /**
+   * When true, suppress focus-stealing behaviors at the MCP level. Currently
+   * this skips bringToFront() during tab selection so that agent-driven tab
+   * switches do not raise the browser window on macOS. The complementary
+   * page-side `window.focus`/select-dropdown shims live with the stealth
+   * init script and are gated separately.
+   */
+  suppressFocus?: boolean;
+
+  /**
+   * When true, skip Playwright's page.on('download') registration so the
+   * embedder's capture stack is the sole owner of downloads. Use when an
+   * external CDP Fetch pipeline already handles download capture and
+   * Playwright's saveAs() would create split ownership.
+   */
+  disableDownloads?: boolean;
+
+  /**
+   * When true, do not close the browser when the last tab closes.
+   *
+   * Currently a no-op against this upstream snapshot: the
+   * `closeBrowserContext()`-on-last-tab path that this flag historically
+   * gated has been removed upstream, so the default behavior is already
+   * "keep alive." The field is preserved so downstream embedders (e.g.,
+   * Sapoto, whose four agent runners pass `--keep-browser-alive` because
+   * they manage the browser lifecycle from Electron) do not crash the MCP
+   * child at commander argv parsing.
+   */
+  keepBrowserAlive?: boolean;
+
+  /**
+   * @deprecated Sapoto PRD #1045 / Tracer A2 — single-boolean alias kept for
+   * one release cycle. The new surface is the decomposed flag set below
+   * (`cdpStealth`, `printCapture`, `chromeRuntimeStubs`, `focusEmulation`).
+   *
+   *   - `stealth: true`  → equivalent to `cdpStealth: ['runtime-cycle',
+   *                        'log-skip', 'worker-runtime']`. The `--stealth`
+   *                        CLI flag and `PLAYWRIGHT_MCP_STEALTH=1` env var
+   *                        still work through this alias.
+   *   - `stealth: false` → equivalent to `cdpStealth: []`. The `--no-stealth`
+   *                        CLI flag and `PLAYWRIGHT_MCP_STEALTH=0` env var
+   *                        still work through this alias.
+   *
+   * Explicit `cdpStealth` always wins over `stealth` when both are set
+   * (mirrors resolveCdpStealthAlias() precedence).
+   */
+  stealth?: boolean;
+
+  /**
+   * Sapoto PRD #1045 / Tracer A2 — decomposed CDP-stealth feature set. Each
+   * entry maps to one specific CDP-domain mitigation that was previously
+   * bundled inside the legacy `stealth: true` boolean:
+   *
+   *   - 'runtime-cycle'  — rapid Runtime.enable→disable cycle around context
+   *                        discovery (keeps the long-lived Runtime domain
+   *                        dark to page scripts after attach).
+   *   - 'log-skip'       — skip Log.enable entirely.
+   *   - 'worker-runtime' — apply the runtime-cycle pattern to worker targets.
+   *
+   * `network-skip` is intentionally NOT a valid entry — Codex P1 review on
+   * PR #28 removed Network.enable gating because it broke
+   * `page.on('request')` listeners. Pass it and the CLI parser throws.
+   */
+  cdpStealth?: string[];
+
+  /**
+   * Sapoto PRD #1045 / Tracer A2 — gates Path D `window.print` override and
+   * the matching console marker bridge. Default: off (the previous-generation
+   * `stealth: true` enabled it unconditionally; A2 splits it out because
+   * it has measurable cost on print-heavy pages even when stealth is on).
+   * A3 / A5 read this off `BrowserOptions.printCapture`.
+   */
+  printCapture?: boolean;
+
+  /**
+   * Sapoto PRD #1045 / Tracer A2 — gates the
+   * chrome.app/chrome.csi/chrome.loadTimes/Notification.permission stubs
+   * injected by `CDP_STEALTH_INIT_SCRIPT`. Default: on. Pass
+   * `chromeRuntimeStubs: false` (or `--chrome-runtime-stubs=off`) to skip
+   * the stubs while keeping other stealth behaviors active.
+   */
+  chromeRuntimeStubs?: boolean;
+
+  /**
+   * Sapoto PRD #1045 / Tracer A2 — gates the
+   * `Emulation.setFocusEmulationEnabled(true)` call A1's BrowserOptions
+   * routes through. Default: on. Pass `focusEmulation: false` (or
+   * `--focus-emulation=off`) to fall back to OS-level focus handling.
+   */
+  focusEmulation?: boolean;
 };
