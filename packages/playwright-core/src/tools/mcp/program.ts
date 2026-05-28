@@ -82,7 +82,6 @@ export function decorateMCPCommand(command: Command) {
       // rationale and the rejection of `network-skip`.
       .option('--cdp-stealth <list>', 'comma-separated list of CDP-stealth features to enable. Allowed values: "runtime-cycle", "log-skip", "worker-runtime", "all" (= all three), or empty (= none). Replaces the legacy --stealth/--no-stealth boolean; those remain as one-cycle aliases for "all" / empty.', parseCdpStealthCLI)
       .option('--print-capture', 'enable the deferred window.print override and the matching console-marker bridge (Path D). Default: off.')
-      .option('--chrome-runtime-stubs <mode>', 'gate chrome.app/chrome.csi/chrome.loadTimes/Notification.permission stubs. Can be "on" or "off". Default is "on".', enumParser.bind(null, '--chrome-runtime-stubs', ['on', 'off']))
       .option('--focus-emulation <mode>', 'gate Emulation.setFocusEmulationEnabled(true). Can be "on" or "off". Default is "on".', enumParser.bind(null, '--focus-emulation', ['on', 'off']))
       // PRD #1045 / Tracer A2 — legacy boolean alias kept for one release
       // cycle. We declare both `--stealth` and `--no-stealth` as separate
@@ -135,10 +134,9 @@ export function decorateMCPCommand(command: Command) {
         //                                 config-file values flow through merge.
         // No normalization needed — commander already produces the right shape.
 
-        // normalize --chrome-runtime-stubs / --focus-emulation enums to booleans.
+        // normalize --focus-emulation enum to boolean.
         // Same pattern as --humanize-input above: emit only when defined so
         // env / config-file defaults survive merge. PRD #1045 / Tracer A2.
-        options.chromeRuntimeStubs = options.chromeRuntimeStubs === undefined ? undefined : ((options.chromeRuntimeStubs as unknown as string) === 'on');
         options.focusEmulation = options.focusEmulation === undefined ? undefined : ((options.focusEmulation as unknown as string) === 'on');
 
         setupExitWatchdog();

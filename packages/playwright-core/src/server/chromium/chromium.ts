@@ -82,7 +82,7 @@ export class Chromium extends BrowserType {
     return super.launchPersistentContext(progress, userDataDir, options);
   }
 
-  override async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, headers?: types.HeadersArray, isLocal?: boolean, noDefaults?: boolean, artifactsDir?: string, cdpStealth?: string[], printCapture?: boolean, chromeRuntimeStubs?: boolean, focusEmulation?: boolean, humanizeInput?: boolean, suppressFocus?: boolean }) {
+  override async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, headers?: types.HeadersArray, isLocal?: boolean, noDefaults?: boolean, artifactsDir?: string, cdpStealth?: string[], printCapture?: boolean, focusEmulation?: boolean, humanizeInput?: boolean, suppressFocus?: boolean }) {
     return await this._connectOverCDPInternal(progress, endpointURL, options);
   }
 
@@ -156,7 +156,6 @@ export class Chromium extends BrowserType {
         noDefaults: options.noDefaults,
         cdpStealth: parseCdpStealthFeatures(options.cdpStealth),
         printCapture: !!(options as any).printCapture,
-        chromeRuntimeStubs: !!(options as any).chromeRuntimeStubs,
         focusEmulation: !!(options as any).focusEmulation,
         humanizeInput: options.humanizeInput,
         suppressFocus: (options as any).suppressFocus,

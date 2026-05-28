@@ -283,7 +283,7 @@ export type Config = {
   /**
    * @deprecated Sapoto PRD #1045 / Tracer A2 — single-boolean alias kept for
    * one release cycle. The new surface is the decomposed flag set below
-   * (`cdpStealth`, `printCapture`, `chromeRuntimeStubs`, `focusEmulation`).
+   * (`cdpStealth`, `printCapture`, `focusEmulation`).
    *
    *   - `stealth: true`  → equivalent to `cdpStealth: ['runtime-cycle',
    *                        'log-skip', 'worker-runtime']`. The `--stealth`
@@ -323,15 +323,6 @@ export type Config = {
    * A3 / A5 read this off `BrowserOptions.printCapture`.
    */
   printCapture?: boolean;
-
-  /**
-   * Sapoto PRD #1045 / Tracer A2 — gates the
-   * chrome.app/chrome.csi/chrome.loadTimes/Notification.permission stubs
-   * injected by `CDP_CAPTURE_BRIDGE_INIT_SCRIPT`. Default: on. Pass
-   * `chromeRuntimeStubs: false` (or `--chrome-runtime-stubs=off`) to skip
-   * the stubs while keeping other stealth behaviors active.
-   */
-  chromeRuntimeStubs?: boolean;
 
   /**
    * Sapoto PRD #1045 / Tracer A2 — gates the
