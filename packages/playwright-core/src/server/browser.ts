@@ -72,11 +72,10 @@ export type BrowserOptions = {
   // the wire-format `cdpStealth: string[]` and rejects `network-skip`
   // (see server/cdpStealth.ts for the per-feature rationale).
   cdpStealth: Set<CdpStealthFeature>;
-  // Sapoto PRD #1045 / Tracer A1: type-only plumbing for the three new
+  // Sapoto PRD #1045 / Tracer A1: type-only plumbing for the decomposed
   // booleans. A5 owns the gating decomposition that consumes them inside
   // captureBridgeInitScript.ts; A1 just lands the field.
   printCapture: boolean;
-  chromeRuntimeStubs: boolean;
   focusEmulation: boolean;
   humanizeInput?: boolean;
   suppressFocus?: boolean;

@@ -368,7 +368,6 @@ export class AndroidDevice extends SdkObject {
         // "no stealth" default. A3/A5 may revisit if Android needs them.
         cdpStealth: new Set(),
         printCapture: false,
-        chromeRuntimeStubs: false,
         focusEmulation: false,
       };
       validateBrowserContextOptions(options, browserOptions);

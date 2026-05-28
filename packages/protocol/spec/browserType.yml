@@ -56,7 +56,6 @@ BrowserType:
           type: array?
           items: string
         printCapture: boolean?
-        chromeRuntimeStubs: boolean?
         focusEmulation: boolean?
         humanizeInput: boolean?
         suppressFocus: boolean?

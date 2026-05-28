@@ -290,7 +290,6 @@ export class Electron extends SdkObject {
         // the "no stealth" default; A3/A5 may revisit if needed.
         cdpStealth: new Set(),
         printCapture: false,
-        chromeRuntimeStubs: false,
         focusEmulation: false,
       };
       validateBrowserContextOptions(contextOptions, browserOptions);

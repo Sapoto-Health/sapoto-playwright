@@ -114,7 +114,7 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
   // `resolveCdpStealthAlias` turns it into the new `cdpStealth: string[]` wire
   // field.
   // PRD #1045 / Tracer A2: also forwards the new decomposed surface (cdpStealth /
-  // printCapture / chromeRuntimeStubs / focusEmulation). configFromCLIOptions
+  // printCapture / focusEmulation). configFromCLIOptions
   // writes all four onto `config.browser.launchOptions`; the connectOverCDP
   // channel accepts them (validator.ts BrowserTypeConnectOverCDPParams), so this
   // function just needs to copy them through. Without this the --cdp-endpoint
@@ -124,7 +124,6 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
     stealthMode?: boolean,
     cdpStealth?: string[],
     printCapture?: boolean,
-    chromeRuntimeStubs?: boolean,
     focusEmulation?: boolean,
     humanizeInput?: boolean,
   }) | undefined;
@@ -133,7 +132,6 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
     stealthMode?: boolean,
     cdpStealth?: string[],
     printCapture?: boolean,
-    chromeRuntimeStubs?: boolean,
     focusEmulation?: boolean,
     suppressFocus?: boolean,
     humanizeInput?: boolean,
@@ -151,8 +149,6 @@ async function createCDPBrowser(config: FullConfig, clientInfo: ClientInfo): Pro
     connectOptions.cdpStealth = launchOptionsWithFork.cdpStealth;
   if (launchOptionsWithFork?.printCapture !== undefined)
     connectOptions.printCapture = launchOptionsWithFork.printCapture;
-  if (launchOptionsWithFork?.chromeRuntimeStubs !== undefined)
-    connectOptions.chromeRuntimeStubs = launchOptionsWithFork.chromeRuntimeStubs;
   if (launchOptionsWithFork?.focusEmulation !== undefined)
     connectOptions.focusEmulation = launchOptionsWithFork.focusEmulation;
   // humanizeInput was dropped from the CDP-attach path until now — only the

@@ -21,7 +21,6 @@
 //
 //   --cdp-stealth=<list>           → BrowserOptions.cdpStealth (Set<feature>)
 //   --print-capture                → BrowserOptions.printCapture (boolean)
-//   --chrome-runtime-stubs={on|off}→ BrowserOptions.chromeRuntimeStubs
 //   --focus-emulation={on|off}     → BrowserOptions.focusEmulation
 //
 // `--stealth` and `--no-stealth` are retained for one release cycle as
@@ -39,7 +38,7 @@
 //   2. resolveCLIConfigForMCP — the integrated CLI option translator. We
 //      assert that the parsed shape lands on `config.browser.launchOptions`
 //      in the fields A1's channel validator forwards verbatim to
-//      `BrowserOptions` (cdpStealth, printCapture, chromeRuntimeStubs,
+//      `BrowserOptions` (cdpStealth, printCapture,
 //      focusEmulation). Validator allow-list confirmed in
 //      packages/playwright-core/src/protocol/validator.ts (BrowserType
 //      launch / launchPersistentContext schemas).
@@ -137,7 +136,7 @@ test('resolveCLIConfigForMCP omits launchOptions.cdpStealth entirely when the fl
 });
 
 // ---------------------------------------------------------------------------
-// Boolean flags — --print-capture, --chrome-runtime-stubs, --focus-emulation
+// Boolean flags — --print-capture, --focus-emulation
 // ---------------------------------------------------------------------------
 
 test('resolveCLIConfigForMCP defaults --print-capture to off (undefined)', async () => {
@@ -151,19 +150,6 @@ test('resolveCLIConfigForMCP defaults --print-capture to off (undefined)', async
 test('resolveCLIConfigForMCP threads --print-capture onto launchOptions.printCapture=true', async () => {
   const config = await resolveCLIConfigForMCP({ printCapture: true }, emptyEnv);
   expect(config.browser.launchOptions.printCapture).toBe(true);
-});
-
-test('resolveCLIConfigForMCP threads --chrome-runtime-stubs=on onto launchOptions.chromeRuntimeStubs=true', async () => {
-  // Default is ON per A2 spec. Program.ts normalizes the unset commander
-  // value to true at the action layer; we verify the option-translator
-  // preserves the explicit-on form here.
-  const config = await resolveCLIConfigForMCP({ chromeRuntimeStubs: true }, emptyEnv);
-  expect(config.browser.launchOptions.chromeRuntimeStubs).toBe(true);
-});
-
-test('resolveCLIConfigForMCP threads --chrome-runtime-stubs=off onto launchOptions.chromeRuntimeStubs=false', async () => {
-  const config = await resolveCLIConfigForMCP({ chromeRuntimeStubs: false }, emptyEnv);
-  expect(config.browser.launchOptions.chromeRuntimeStubs).toBe(false);
 });
 
 test('resolveCLIConfigForMCP threads --focus-emulation=on onto launchOptions.focusEmulation=true', async () => {

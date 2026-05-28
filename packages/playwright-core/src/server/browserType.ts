@@ -137,7 +137,6 @@ export abstract class BrowserType extends SdkObject {
         // instead of silently degrading inside crPage.
         cdpStealth: parseCdpStealthFeatures(options.cdpStealth),
         printCapture: !!options.printCapture,
-        chromeRuntimeStubs: !!options.chromeRuntimeStubs,
         focusEmulation: !!options.focusEmulation,
         humanizeInput: options.humanizeInput,
       };
@@ -295,7 +294,7 @@ export abstract class BrowserType extends SdkObject {
     }
   }
 
-  async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, timeout?: number, headers?: types.HeadersArray, isLocal?: boolean, noDefaults?: boolean, artifactsDir?: string, cdpStealth?: string[], printCapture?: boolean, chromeRuntimeStubs?: boolean, focusEmulation?: boolean, humanizeInput?: boolean, suppressFocus?: boolean }): Promise<Browser> {
+  async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, timeout?: number, headers?: types.HeadersArray, isLocal?: boolean, noDefaults?: boolean, artifactsDir?: string, cdpStealth?: string[], printCapture?: boolean, focusEmulation?: boolean, humanizeInput?: boolean, suppressFocus?: boolean }): Promise<Browser> {
     throw new Error('CDP connections are only supported by Chromium');
   }
 

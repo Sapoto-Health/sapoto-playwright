@@ -99,9 +99,8 @@ playwrightTest('neither flag is set when omitted (default)', async ({ browserTyp
     // PRD #1045 / Tracer A1: cdpStealth is always a Set; default is empty.
     expect(serverBrowser.options.cdpStealth, 'cdpStealth not materialized on BrowserOptions').toBeInstanceOf(Set);
     expect(serverBrowser.options.cdpStealth.size, 'cdpStealth leaked when not requested').toBe(0);
-    // PRD #1045 / Tracer A1: the three new booleans default to false.
+    // PRD #1045 / Tracer A1: the decomposed booleans default to false.
     expect(serverBrowser.options.printCapture, 'printCapture leaked when not requested').toBe(false);
-    expect(serverBrowser.options.chromeRuntimeStubs, 'chromeRuntimeStubs leaked when not requested').toBe(false);
     expect(serverBrowser.options.focusEmulation, 'focusEmulation leaked when not requested').toBe(false);
   } finally {
     await browser.close();
