@@ -996,10 +996,10 @@ class FrameSession {
     // When connected via connectOverCDP, real Chrome already has correct native
     // UA-CH brands with proper GREASE rotation. Calling setUserAgentOverride
     // replaces those correct native values with stale/incomplete metadata.
-    // Skip unless the caller explicitly set a custom userAgent.
+    // Skip unless the caller explicitly set a custom userAgent or locale.
     const browser = this._crPage._browserContext._browser as CRBrowser;
     const options = this._crPage._browserContext._options;
-    if (browser._isConnectedOverCDP && !options.userAgent)
+    if (browser._isConnectedOverCDP && !options.userAgent && !options.locale)
       return;
     await this._client.send('Emulation.setUserAgentOverride', {
       userAgent: options.userAgent || '',
