@@ -24,7 +24,7 @@ import * as frames from '../frames';
 import { helper } from '../helper';
 import * as network from '../network';
 import { Page, PageBinding, Worker } from '../page';
-import { CRBrowserContext } from './crBrowser';
+import { CRBrowserContext, type CRBrowser } from './crBrowser';
 import { CRCoverage } from './crCoverage';
 import { DragManager } from './crDragDrop';
 import { createHandle, CRExecutionContext } from './crExecutionContext';
@@ -993,7 +993,14 @@ class FrameSession {
   }
 
   async _updateUserAgent(): Promise<void> {
+    // When connected via connectOverCDP, real Chrome already has correct native
+    // UA-CH brands with proper GREASE rotation. Calling setUserAgentOverride
+    // replaces those correct native values with stale/incomplete metadata.
+    // Skip unless the caller explicitly set a custom userAgent.
+    const browser = this._crPage._browserContext._browser as CRBrowser;
     const options = this._crPage._browserContext._options;
+    if (browser._isConnectedOverCDP && !options.userAgent)
+      return;
     await this._client.send('Emulation.setUserAgentOverride', {
       userAgent: options.userAgent || '',
       acceptLanguage: options.locale,

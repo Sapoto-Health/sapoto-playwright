@@ -156,6 +156,7 @@ export class Chromium extends BrowserType {
       };
       validateBrowserContextOptions(persistent, browserOptions);
       const browser = await progress.race(CRBrowser.connect(this.attribution.playwright, transport, browserOptions));
+      browser._isConnectedOverCDP = true;
       if (!options.isLocal)
         browser._isCollocatedWithServer = false;
       browser.on(Browser.Events.Disconnected, doCleanup);
