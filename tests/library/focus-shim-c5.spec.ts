@@ -539,3 +539,21 @@ test('shim is installed non-writable so a later assignment cannot replace it', (
   // Identity preserved.
   expect(ctx.open).toBe(shimFn);
 });
+
+test('shim descriptor matches stock Chrome: configurable:true', () => {
+  const ctx = newShimContext();
+  installShim(ctx, true);
+
+  // Read the property descriptor the shim installed on window.open.
+  const desc = vm.runInContext(
+      `Object.getOwnPropertyDescriptor(globalThis, 'open')`,
+      ctx);
+
+  // Stock Chrome's window.open is { writable:true, enumerable:true,
+  // configurable:true }. Our shim sets writable:false (tamper-resistant)
+  // but MUST keep configurable:true to avoid a detectable fingerprint
+  // (configurable:false is not the stock descriptor shape).
+  expect(desc.configurable).toBe(true);
+  expect(desc.writable).toBe(false);
+  expect(desc.enumerable).toBe(true);
+});
